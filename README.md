@@ -1,36 +1,39 @@
-# Qxbroker / Quotex CV Bot (Accuracy-Focused Revision)
+# Qxbroker / Quotex CV Bot (Dual Signal + Heavy Local AI)
 
 > ⚠️ Educational / paper-trading only.
 
-You asked for a more accurate AI model and said model size is not a concern. This revision upgrades the predictor from a simple fixed-rule score into a richer **adaptive feature model**.
+This revised version now shows:
+- **Current signal** (what it sees right now)
+- **Next signal** (prediction for next candle)
 
-## What was improved for accuracy
+It also upgrades the local model into a much heavier architecture with an optional **~5GB on-disk memory bank**.
 
-- Added **multi-feature engineering** from extracted candles:
-  - short/medium momentum (`ret1`, `ret3`)
-  - body/range ratio
-  - EMA spread (fast/slow)
-  - RSI-derived momentum
-  - rolling volatility
-  - short linear trend slope
-  - support/resistance distance features
-  - pattern and template-match signals
-- Added an **adaptive online learner**:
-  - stores pending predictions
-  - compares predicted direction vs next candle outcome
-  - updates model weights incrementally (online learning)
-  - displays recent rolling accuracy in overlay
-- Expanded logging to include:
-  - raw model score
-  - recent adaptive accuracy
+## What changed
 
-## Security verification behavior (your qxbroker issue)
+- Added dual signal outputs:
+  - `CURRENT SIGNAL`
+  - `NEXT SIGNAL` + ETA countdown
+- Polished UI with card-style overlay, confidence bar, and cleaner status text.
+- Added a much richer feature set (36 engineered features):
+  - multi-horizon momentum, velocity
+  - body/wick structure
+  - EMA spreads, MACD, RSI, stochastic, CCI, ATR
+  - volatility, trend slopes, Bollinger position
+  - support/resistance distances
+  - bullish ratio windows, template score, pattern score
+- Added heavy local model stack:
+  - linear head
+  - deep nonlinear head
+  - optional on-disk memory bank (`memmap`) targeting ~5GB
+  - online adaptation from realized candle outcomes
+
+## qxbroker security verification
 
 If you see:
 - "Performing security verification"
 - "This website uses a security service..."
 
-The app waits for you to complete it manually in the opened browser. It does **not** bypass anti-bot checks.
+Complete verification manually in the opened browser window; the app waits for it. This bot does **not** bypass anti-bot checks.
 
 ## Install
 
@@ -47,11 +50,11 @@ python -m playwright install chromium
 cp config.example.yaml config.yaml
 ```
 
-Most important settings:
-- `prediction.adaptive_learning_rate`
-- `prediction.feature_weights`
-- chart color thresholds (`chart.bullish_*`, `chart.bearish_*`)
-- `chart.timeframe_seconds`
+Key settings:
+- `model.enable_heavy_memory_bank: true`
+- `model.target_size_gb: 5.0`
+- `prediction.feature_weights` (36 values)
+- chart color thresholds + timeframe
 
 ## Run
 
@@ -59,16 +62,20 @@ Most important settings:
 python quotex_cv_bot.py
 ```
 
-Runtime flow:
-1. App opens qxbroker in browser.
-2. Complete verification/login manually.
+Runtime:
+1. Browser opens qxbroker.
+2. Complete verification/login.
 3. Press Enter in terminal.
-4. Drag-select chart area once.
-5. Bot runs with adaptive model and live accuracy display.
+4. Drag-select chart ROI once.
+5. Bot starts dual-signal output with heavy local model.
 
 ## Hotkeys
 
 - `S` pause/resume
-- `L` toggle CSV logging
-- `+/-` adjust alert threshold
+- `L` logging on/off
+- `+/-` alert threshold
 - `Q` quit
+
+## Notes on 5GB model
+
+On first run with `enable_heavy_memory_bank: true`, the app creates a large local memmap file in `model_dir`. This can take time and disk space, but gives you a heavier local model footprint as requested.

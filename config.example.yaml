@@ -4,31 +4,39 @@ browser:
   user_data_dir: ".qxbroker_profile"
   channel: "chrome"
   viewport:
-    width: 1400
-    height: 900
+    width: 1500
+    height: 950
   slow_mo_ms: 0
   security_wait_timeout_seconds: 300
 
 chart:
   timeframe_seconds: 60
-  max_candles: 160
+  max_candles: 220
   bullish_bgr_min: [20, 120, 20]
-  bullish_bgr_max: [160, 255, 160]
+  bullish_bgr_max: [170, 255, 170]
   bearish_bgr_min: [20, 20, 120]
-  bearish_bgr_max: [160, 160, 255]
+  bearish_bgr_max: [170, 170, 255]
 
 prediction:
-  min_confidence_alert: 75
-  support_resistance_lookback: 80
-  adaptive_learning_rate: 0.03
+  min_confidence_alert: 78
+  support_resistance_lookback: 120
+  adaptive_learning_rate: 0.015
   model_bias: 0.0
-  # 12 weights for engineered features (ret1, ret3, body_ratio, ema_diff, rsi, vol, trend, support_dist,
-  # resistance_dist, pattern_score, template_score, bias_feature)
-  feature_weights: [0.8, 0.6, 0.3, 0.9, 0.8, -0.2, 0.8, 0.3, -0.3, 0.7, 0.4, 0.0]
+  # 36 weights must match FeatureEngineer.FEATURE_DIM.
+  feature_weights: [0.15, 0.14, 0.16, 0.12, 0.10, 0.10, 0.08, -0.02, 0.03, 0.11, 0.11, 0.10, 0.07, 0.06, -0.02, 0.08, 0.05, 0.07, -0.04, -0.03, 0.12, 0.12, 0.05, 0.06, -0.06, 0.06, 0.05, 0.04, 0.08, 0.09, 0.04, 0.03, 0.07, 0.08, 0.08, 0.0]
+
+model:
+  # Heavy local model settings
+  enable_heavy_memory_bank: true
+  target_size_gb: 5.0
+  model_dir: "./local_model"
+  hidden_dim: 512
+  memory_sample_rows: 4096
+  seed: 42
 
 logging:
   enabled: true
   file: predictions_log.csv
 
 ui:
-  window_name: "Qxbroker CV Bot"
+  window_name: "Qxbroker AI Signals"
