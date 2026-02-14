@@ -1,9 +1,10 @@
 import csv
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Deque, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -28,11 +29,17 @@ class Prediction:
     eta_seconds: int
     pattern: str
     reason: str
+    score: float
+
+
+@dataclass
+class PendingPrediction:
+    candle_index: int
+    score: float
+    features: np.ndarray
 
 
 class QuotexWebApp:
-    """Launch qxbroker/Quotex in app browser and allow manual verification/login."""
-
     def __init__(self, cfg: dict):
         bcfg = cfg["browser"]
         self.user_data_dir = bcfg["user_data_dir"]
@@ -59,16 +66,10 @@ class QuotexWebApp:
         self.page.goto(self.url, wait_until="domcontentloaded")
 
     def wait_for_manual_security_clear(self):
-        """Wait until anti-bot interstitial is gone; user solves it manually in browser."""
         assert self.page is not None
-
-        print("If you see a security verification page, complete it manually in the browser window.")
+        print("If security verification appears, solve it in the browser window first.")
         deadline = time.time() + self.security_timeout
-        markers = [
-            "performing security verification",
-            "verifies you are not a bot",
-            "security service",
-        ]
+        markers = ["performing security verification", "verifies you are not a bot", "security service"]
 
         while time.time() < deadline:
             try:
@@ -81,10 +82,9 @@ class QuotexWebApp:
 
             if any(m in text for m in markers):
                 continue
-
             return
 
-        print("Security verification still detected/timed out. You can keep trying manually, then press Enter.")
+        print("Verification timeout reached; continue manually once chart is visible.")
 
     def capture_frame(self) -> np.ndarray:
         assert self.page is not None
@@ -111,7 +111,6 @@ class CandleExtractor:
     def extract(self, roi: np.ndarray) -> List[Candle]:
         bull_mask = cv2.inRange(roi, self.bull_min, self.bull_max)
         bear_mask = cv2.inRange(roi, self.bear_min, self.bear_max)
-
         kernel = np.ones((3, 3), np.uint8)
         bull_mask = cv2.morphologyEx(bull_mask, cv2.MORPH_OPEN, kernel)
         bear_mask = cv2.morphologyEx(bear_mask, cv2.MORPH_OPEN, kernel)
@@ -172,7 +171,7 @@ class PatternDetector:
 
 class TemplateMatcher:
     def __init__(self):
-        self.templates = [self._small_body_template(), self._long_body_template()]
+        self.templates = [self._small_body_template(), self._long_body_template(), self._doji_template()]
 
     @staticmethod
     def _small_body_template() -> np.ndarray:
@@ -186,6 +185,13 @@ class TemplateMatcher:
         img = np.zeros((24, 10), dtype=np.uint8)
         cv2.line(img, (5, 1), (5, 22), 255, 1)
         cv2.rectangle(img, (2, 4), (8, 20), 255, -1)
+        return img
+
+    @staticmethod
+    def _doji_template() -> np.ndarray:
+        img = np.zeros((20, 10), dtype=np.uint8)
+        cv2.line(img, (5, 1), (5, 18), 255, 1)
+        cv2.rectangle(img, (1, 9), (9, 11), 255, -1)
         return img
 
     def match_score(self, candle_patch: np.ndarray) -> float:
@@ -202,59 +208,151 @@ class TemplateMatcher:
         return best
 
 
-class Analyzer:
+class FeatureEngineer:
     @staticmethod
-    def support_resistance(candles: List[Candle], lookback: int) -> Tuple[Optional[float], Optional[float]]:
-        if not candles:
-            return None, None
-        sample = candles[-lookback:]
-        return float(np.percentile([c.low for c in sample], 20)), float(np.percentile([c.high for c in sample], 80))
-
-    @staticmethod
-    def trend_score(candles: List[Candle], lookback: int) -> float:
-        if len(candles) < max(5, lookback // 2):
+    def _ema(values: np.ndarray, period: int) -> float:
+        if values.size == 0:
             return 0.0
-        closes = np.array([c.close for c in candles[-lookback:]], dtype=np.float32)
-        slope = np.polyfit(np.arange(len(closes), dtype=np.float32), closes, 1)[0]
-        return float(np.tanh(slope / 2.5))
+        alpha = 2.0 / (period + 1)
+        ema = values[0]
+        for v in values[1:]:
+            ema = alpha * v + (1 - alpha) * ema
+        return float(ema)
+
+    @staticmethod
+    def _rsi(closes: np.ndarray, period: int = 14) -> float:
+        if len(closes) < period + 1:
+            return 50.0
+        diffs = np.diff(closes[-(period + 1) :])
+        gains = np.clip(diffs, 0, None)
+        losses = np.abs(np.clip(diffs, None, 0))
+        avg_gain = float(np.mean(gains))
+        avg_loss = float(np.mean(losses))
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return float(100 - (100 / (1 + rs)))
+
+    @staticmethod
+    def build(candles: List[Candle], pattern: str, support: Optional[float], resistance: Optional[float], tpl_score: float) -> np.ndarray:
+        if len(candles) < 8:
+            return np.zeros(12, dtype=np.float32)
+
+        closes = np.array([c.close for c in candles], dtype=np.float32)
+        opens = np.array([c.open for c in candles], dtype=np.float32)
+        highs = np.array([c.high for c in candles], dtype=np.float32)
+        lows = np.array([c.low for c in candles], dtype=np.float32)
+
+        ret1 = float(closes[-1] - closes[-2])
+        ret3 = float(closes[-1] - closes[-4]) if len(closes) > 4 else ret1
+        body = float(abs(closes[-1] - opens[-1]))
+        range_last = float(max(1e-6, lows[-1] - highs[-1]))
+        body_ratio = body / range_last
+
+        ema_fast = FeatureEngineer._ema(closes[-15:], 5)
+        ema_slow = FeatureEngineer._ema(closes[-30:], 12)
+        ema_diff = ema_fast - ema_slow
+
+        rsi = FeatureEngineer._rsi(closes)
+        rsi_centered = (rsi - 50.0) / 50.0
+
+        vol = float(np.std(np.diff(closes[-20:]))) if len(closes) > 20 else float(np.std(np.diff(closes)))
+        trend_slope = float(np.polyfit(np.arange(min(20, len(closes))), closes[-min(20, len(closes)) :], 1)[0])
+
+        support_dist = 0.0 if support is None else float(closes[-1] - support)
+        resistance_dist = 0.0 if resistance is None else float(resistance - closes[-1])
+
+        pattern_value = {
+            "HAMMER": 0.5,
+            "BULLISH_ENGULFING": 0.8,
+            "BEARISH_ENGULFING": -0.8,
+            "DOJI": 0.0,
+            "NONE": 0.0,
+        }.get(pattern, 0.0)
+
+        feats = np.array(
+            [
+                ret1,
+                ret3,
+                body_ratio,
+                ema_diff,
+                rsi_centered,
+                vol,
+                trend_slope,
+                support_dist,
+                resistance_dist,
+                pattern_value,
+                tpl_score,
+                1.0,
+            ],
+            dtype=np.float32,
+        )
+
+        scale = np.array([20, 30, 1, 20, 1, 15, 8, 30, 30, 1, 1, 1], dtype=np.float32)
+        return np.clip(feats / scale, -3, 3)
 
 
-class Predictor:
-    def __init__(self, timeframe_seconds: int):
-        self.timeframe_seconds = timeframe_seconds
+class AdaptivePredictor:
+    def __init__(self, cfg: dict):
+        self.timeframe_seconds = int(cfg["chart"]["timeframe_seconds"])
+        pcfg = cfg["prediction"]
+        self.lr = float(pcfg.get("adaptive_learning_rate", 0.03))
+        base_weights = pcfg.get(
+            "feature_weights",
+            [0.8, 0.6, 0.3, 0.9, 0.8, -0.2, 0.8, 0.3, -0.3, 0.7, 0.4, 0.0],
+        )
+        self.weights = np.array(base_weights, dtype=np.float32)
+        self.bias = float(pcfg.get("model_bias", 0.0))
+        self.pending: Deque[PendingPrediction] = deque(maxlen=20)
+        self.recent_hits: Deque[int] = deque(maxlen=200)
 
-    def predict(self, candles: List[Candle], trend: float, sr: Tuple[Optional[float], Optional[float]], pattern: str, tpl_score: float) -> Prediction:
-        if not candles:
-            return Prediction("CALL", 50.0, self.timeframe_seconds, "NONE", "no_data")
+    def _score(self, features: np.ndarray) -> float:
+        raw = float(np.dot(self.weights, features) + self.bias)
+        return float(np.tanh(raw))
 
-        support, resistance = sr
-        last = candles[-1]
-        bias = trend
-        reasons = [f"trend={trend:.2f}", f"tpl={tpl_score:.2f}"]
+    def predict(self, candles: List[Candle], features: np.ndarray, pattern: str) -> Prediction:
+        if len(candles) < 8:
+            eta = max(1, self.timeframe_seconds - int(time.time() % self.timeframe_seconds))
+            return Prediction("CALL", 50.0, eta, pattern, "insufficient_data", 0.0)
 
-        if support is not None and resistance is not None:
-            if abs(last.close - support) < abs(last.close - resistance):
-                bias += 0.12
-                reasons.append("near_support")
-            else:
-                bias -= 0.12
-                reasons.append("near_resistance")
+        score = self._score(features)
+        direction = "CALL" if score >= 0 else "PUT"
 
-        if pattern in ("HAMMER", "BULLISH_ENGULFING"):
-            bias += 0.24
-        elif pattern == "BEARISH_ENGULFING":
-            bias -= 0.24
-        elif pattern == "DOJI":
-            bias *= 0.5
+        model_conf = 50 + abs(score) * 40
+        adaptive_acc = self.get_recent_accuracy()
+        confidence = np.clip(model_conf * 0.7 + adaptive_acc * 30 * 0.3, 50, 99)
 
-        if tpl_score > 0.75:
-            bias += 0.08 if last.is_bullish else -0.08
-
-        bias = float(np.clip(bias, -1.0, 1.0))
-        direction = "CALL" if bias >= 0 else "PUT"
-        confidence = round(50 + abs(bias) * 50, 1)
         eta = max(1, self.timeframe_seconds - int(time.time() % self.timeframe_seconds))
-        return Prediction(direction, confidence, eta, pattern, ",".join(reasons))
+        reason = f"score={score:.2f},acc={adaptive_acc*100:.1f}%"
+
+        self.pending.append(PendingPrediction(candle_index=len(candles), score=score, features=features.copy()))
+        return Prediction(direction, float(round(confidence, 1)), eta, pattern, reason, score)
+
+    def update_from_outcome(self, candles: List[Candle]):
+        if len(candles) < 2 or not self.pending:
+            return
+
+        new_pending: Deque[PendingPrediction] = deque(maxlen=20)
+        realized = 1.0 if candles[-1].close < candles[-2].close else -1.0
+
+        for p in self.pending:
+            if p.candle_index < len(candles):
+                pred_label = 1.0 if p.score >= 0 else -1.0
+                hit = int(pred_label == realized)
+                self.recent_hits.append(hit)
+
+                error = realized - pred_label
+                self.weights = self.weights + self.lr * error * p.features
+                self.bias = self.bias + self.lr * error * 0.1
+            else:
+                new_pending.append(p)
+
+        self.pending = new_pending
+
+    def get_recent_accuracy(self) -> float:
+        if not self.recent_hits:
+            return 0.5
+        return float(np.mean(np.array(self.recent_hits, dtype=np.float32)))
 
 
 class Logger:
@@ -263,13 +361,26 @@ class Logger:
         self.path = Path(file_path)
         if self.enabled and not self.path.exists():
             with self.path.open("w", newline="", encoding="utf-8") as f:
-                csv.writer(f).writerow(["timestamp", "direction", "confidence", "eta", "pattern", "reason"])
+                csv.writer(f).writerow(
+                    ["timestamp", "direction", "confidence", "eta", "pattern", "reason", "score", "recent_accuracy"]
+                )
 
-    def write(self, p: Prediction):
+    def write(self, p: Prediction, recent_accuracy: float):
         if not self.enabled:
             return
         with self.path.open("a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow([datetime.utcnow().isoformat(), p.direction, p.confidence, p.eta_seconds, p.pattern, p.reason])
+            csv.writer(f).writerow(
+                [
+                    datetime.utcnow().isoformat(),
+                    p.direction,
+                    p.confidence,
+                    p.eta_seconds,
+                    p.pattern,
+                    p.reason,
+                    p.score,
+                    round(recent_accuracy * 100, 2),
+                ]
+            )
 
 
 def select_chart_roi(frame: np.ndarray) -> Tuple[int, int, int, int]:
@@ -282,17 +393,18 @@ def select_chart_roi(frame: np.ndarray) -> Tuple[int, int, int, int]:
     return x, y, w, h
 
 
-def draw_overlay(frame: np.ndarray, pred: Prediction, sr: Tuple[Optional[float], Optional[float]], active: bool):
+def draw_overlay(frame: np.ndarray, pred: Prediction, sr: Tuple[Optional[float], Optional[float]], active: bool, recent_acc: float):
     support, resistance = sr
     out = frame.copy()
     _, w = out.shape[:2]
-    cv2.rectangle(out, (0, 0), (w, 95), (15, 15, 15), -1)
+    cv2.rectangle(out, (0, 0), (w, 110), (15, 15, 15), -1)
 
     col = (80, 220, 80) if pred.direction == "CALL" else (80, 80, 220)
     cv2.putText(out, f"Status: {'RUNNING' if active else 'PAUSED'}", (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (230, 230, 230), 1)
-    cv2.putText(out, f"Signal: {pred.direction}   Confidence: {pred.confidence:.1f}%", (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.65, col, 2)
-    cv2.putText(out, f"Next candle: {pred.eta_seconds}s   Pattern: {pred.pattern}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (220, 220, 220), 1)
-    cv2.putText(out, "Hotkeys: S pause | Q quit | L log | +/- alert", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (170, 170, 170), 1)
+    cv2.putText(out, f"Signal: {pred.direction}  Confidence: {pred.confidence:.1f}%", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.63, col, 2)
+    cv2.putText(out, f"Next candle: {pred.eta_seconds}s  Pattern: {pred.pattern}", (10, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.54, (220, 220, 220), 1)
+    cv2.putText(out, f"Adaptive accuracy (recent): {recent_acc*100:.1f}%  Score: {pred.score:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    cv2.putText(out, "Hotkeys: S pause | Q quit | L log | +/- alert", (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.43, (170, 170, 170), 1)
 
     if support is not None:
         cv2.line(out, (0, int(support)), (w, int(support)), (0, 200, 200), 1)
@@ -317,17 +429,24 @@ def load_config(path="config.yaml") -> dict:
     return yaml.safe_load(p.read_text(encoding="utf-8"))
 
 
+def support_resistance(candles: List[Candle], lookback: int) -> Tuple[Optional[float], Optional[float]]:
+    if not candles:
+        return None, None
+    sample = candles[-lookback:]
+    return float(np.percentile([c.low for c in sample], 20)), float(np.percentile([c.high for c in sample], 80))
+
+
 def main():
     cfg = load_config()
     web = QuotexWebApp(cfg)
     extractor = CandleExtractor(cfg)
     matcher = TemplateMatcher()
-    predictor = Predictor(cfg["chart"]["timeframe_seconds"])
+    predictor = AdaptivePredictor(cfg)
     logger = Logger(cfg["logging"]["enabled"], cfg["logging"]["file"])
 
     web.start()
     web.wait_for_manual_security_clear()
-    input("After you complete verification/login and chart is visible, press ENTER...")
+    input("After verification/login and chart visible, press ENTER...")
 
     x, y, w, h = select_chart_roi(web.capture_frame())
     active = True
@@ -337,29 +456,35 @@ def main():
     while True:
         frame = web.capture_frame()
         chart = frame[y : y + h, x : x + w]
-        pred = Prediction("CALL", 50.0, cfg["chart"]["timeframe_seconds"], "NONE", "paused")
+        pred = Prediction("CALL", 50.0, cfg["chart"]["timeframe_seconds"], "NONE", "paused", 0.0)
         sr = (None, None)
 
         if active:
             candles = extractor.extract(chart)
+            predictor.update_from_outcome(candles)
+
             pattern = PatternDetector.detect(candles)
-            sr = Analyzer.support_resistance(candles, cfg["prediction"]["support_resistance_lookback"])
-            trend = Analyzer.trend_score(candles, cfg["prediction"]["trend_lookback"])
+            sr = support_resistance(candles, cfg["prediction"]["support_resistance_lookback"])
 
             tpl_score = 0.0
             if candles:
                 cx = int(np.clip(candles[-1].x, 8, chart.shape[1] - 8))
                 tpl_score = matcher.match_score(chart[:, max(0, cx - 8) : min(chart.shape[1], cx + 8)])
 
-            pred = predictor.predict(candles, trend, sr, pattern, tpl_score)
-            logger.write(pred)
+            features = FeatureEngineer.build(candles, pattern, sr[0], sr[1], tpl_score)
+            pred = predictor.predict(candles, features, pattern)
+
+            recent_acc = predictor.get_recent_accuracy()
+            logger.write(pred, recent_acc)
 
             now = int(time.time())
             if pred.confidence >= alert_threshold and now != last_alert_sec:
                 beep()
                 last_alert_sec = now
+        else:
+            recent_acc = predictor.get_recent_accuracy()
 
-        cv2.imshow(cfg["ui"]["window_name"], draw_overlay(chart, pred, sr, active))
+        cv2.imshow(cfg["ui"]["window_name"], draw_overlay(chart, pred, sr, active, recent_acc))
         key = cv2.waitKey(1) & 0xFF
         if key in (ord("q"), 27):
             break

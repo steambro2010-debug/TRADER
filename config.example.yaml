@@ -11,7 +11,7 @@ browser:
 
 chart:
   timeframe_seconds: 60
-  max_candles: 120
+  max_candles: 160
   bullish_bgr_min: [20, 120, 20]
   bullish_bgr_max: [160, 255, 160]
   bearish_bgr_min: [20, 20, 120]
@@ -19,8 +19,12 @@ chart:
 
 prediction:
   min_confidence_alert: 75
-  trend_lookback: 20
   support_resistance_lookback: 80
+  adaptive_learning_rate: 0.03
+  model_bias: 0.0
+  # 12 weights for engineered features (ret1, ret3, body_ratio, ema_diff, rsi, vol, trend, support_dist,
+  # resistance_dist, pattern_score, template_score, bias_feature)
+  feature_weights: [0.8, 0.6, 0.3, 0.9, 0.8, -0.2, 0.8, 0.3, -0.3, 0.7, 0.4, 0.0]
 
 logging:
   enabled: true

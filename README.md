@@ -1,21 +1,36 @@
-# Qxbroker / Quotex CV Bot (Revised)
+# Qxbroker / Quotex CV Bot (Accuracy-Focused Revision)
 
 > ⚠️ Educational / paper-trading only.
 
-This revised version is for your `qxbroker.com` case where you see:
+You asked for a more accurate AI model and said model size is not a concern. This revision upgrades the predictor from a simple fixed-rule score into a richer **adaptive feature model**.
+
+## What was improved for accuracy
+
+- Added **multi-feature engineering** from extracted candles:
+  - short/medium momentum (`ret1`, `ret3`)
+  - body/range ratio
+  - EMA spread (fast/slow)
+  - RSI-derived momentum
+  - rolling volatility
+  - short linear trend slope
+  - support/resistance distance features
+  - pattern and template-match signals
+- Added an **adaptive online learner**:
+  - stores pending predictions
+  - compares predicted direction vs next candle outcome
+  - updates model weights incrementally (online learning)
+  - displays recent rolling accuracy in overlay
+- Expanded logging to include:
+  - raw model score
+  - recent adaptive accuracy
+
+## Security verification behavior (your qxbroker issue)
+
+If you see:
 - "Performing security verification"
 - "This website uses a security service..."
 
-## What changed in this revision
-
-- Default URL changed to `https://qxbroker.com/en/trade`.
-- Added an explicit **manual security verification wait step** before analysis starts.
-- Kept in-app login flow (browser opened by app).
-- Keeps one-time ROI selection so centering is easier.
-
-## Important note about verification pages
-
-The bot does **not** bypass anti-bot security. You must complete any challenge manually in the opened browser window. After it clears and your chart is visible, press Enter in terminal.
+The app waits for you to complete it manually in the opened browser. It does **not** bypass anti-bot checks.
 
 ## Install
 
@@ -32,9 +47,10 @@ python -m playwright install chromium
 cp config.example.yaml config.yaml
 ```
 
-If needed, tune:
-- `browser.security_wait_timeout_seconds`
-- candle color thresholds under `chart`
+Most important settings:
+- `prediction.adaptive_learning_rate`
+- `prediction.feature_weights`
+- chart color thresholds (`chart.bullish_*`, `chart.bearish_*`)
 - `chart.timeframe_seconds`
 
 ## Run
@@ -44,11 +60,11 @@ python quotex_cv_bot.py
 ```
 
 Runtime flow:
-1. App opens browser at qxbroker.
-2. Complete security verification/login manually.
+1. App opens qxbroker in browser.
+2. Complete verification/login manually.
 3. Press Enter in terminal.
 4. Drag-select chart area once.
-5. Bot starts live analysis.
+5. Bot runs with adaptive model and live accuracy display.
 
 ## Hotkeys
 
