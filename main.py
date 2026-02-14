@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QFormLayout,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -175,42 +177,97 @@ def open_path(path: Path) -> None:
         raise RuntimeError(f"Unable to open: {path}\n{exc}") from exc
 
 
+class AppCard(QFrame):
+    """Reusable elevated panel to group related UI sections."""
+
+    def __init__(self, title: str = "", subtitle: str = "") -> None:
+        super().__init__()
+        self.setObjectName("card")
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(24, 22, 24, 22)
+        self.layout.setSpacing(14)
+
+        if title:
+            title_label = QLabel(title)
+            title_label.setObjectName("cardTitle")
+            self.layout.addWidget(title_label)
+        if subtitle:
+            subtitle_label = QLabel(subtitle)
+            subtitle_label.setObjectName("cardSubtitle")
+            subtitle_label.setWordWrap(True)
+            self.layout.addWidget(subtitle_label)
+
+
+class PageHeader(QWidget):
+    def __init__(self, title: str, subtitle: str, action_text: str = "Back", action=None) -> None:
+        super().__init__()
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(14)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("pageTitle")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("pageSubtitle")
+        subtitle_label.setWordWrap(True)
+
+        text_col.addWidget(title_label)
+        text_col.addWidget(subtitle_label)
+
+        root.addLayout(text_col)
+        root.addStretch(1)
+
+        if action is not None:
+            action_btn = QPushButton(action_text)
+            action_btn.setObjectName("secondaryButton")
+            action_btn.clicked.connect(action)
+            root.addWidget(action_btn)
+
+
 class DashboardPage(QWidget):
     def __init__(self, on_new, on_search, on_bills, on_records):
         super().__init__()
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(34, 30, 34, 30)
+        root.setSpacing(20)
 
-        title = QLabel(CLINIC_NAME)
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Segoe UI", 24, QFont.Bold))
+        banner = AppCard(CLINIC_NAME, DOCTOR_NAME)
+        banner.layout.setSpacing(10)
+        welcome = QLabel("Clinic Dashboard")
+        welcome.setObjectName("heroTitle")
+        message = QLabel("Select an action to manage patients, billing, and records.")
+        message.setObjectName("heroSubtitle")
+        banner.layout.addWidget(welcome)
+        banner.layout.addWidget(message)
+        root.addWidget(banner)
 
-        subtitle = QLabel(DOCTOR_NAME)
-        subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setFont(QFont("Segoe UI", 12))
+        actions_card = AppCard("Quick Actions", "Core workflows for day-to-day clinic operations")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(16)
 
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(14)
-
-        buttons = [
-            ("New Patient", on_new),
-            ("Search Patient", on_search),
-            ("View Bills", on_bills),
-            ("Records", on_records),
+        actions = [
+            ("New Patient", "Register a visit and create bill", True, on_new),
+            ("Search Patient", "Find patient bills quickly", False, on_search),
+            ("View Bills", "Browse all generated bills", False, on_bills),
+            ("Records", "Open master records and folders", False, on_records),
         ]
-        for text, callback in buttons:
-            btn = QPushButton(text)
-            btn.setMinimumHeight(70)
-            btn.setFont(QFont("Segoe UI", 14, QFont.Bold))
-            btn.clicked.connect(callback)
-            btn_layout.addWidget(btn)
 
-        layout.addStretch(1)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addSpacing(20)
-        layout.addLayout(btn_layout)
-        layout.addStretch(1)
+        for idx, (label, hint, primary, callback) in enumerate(actions):
+            btn = QPushButton(f"{label}\n{hint}")
+            btn.setObjectName("primaryAction" if primary else "dashboardAction")
+            btn.setMinimumHeight(95)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(callback)
+            row, col = divmod(idx, 2)
+            grid.addWidget(btn, row, col)
+
+        actions_card.layout.addLayout(grid)
+        root.addWidget(actions_card)
+        root.addStretch(1)
 
 
 class NewPatientPage(QWidget):
@@ -220,12 +277,25 @@ class NewPatientPage(QWidget):
         self.on_back = on_back
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(34, 30, 34, 30)
+        root.setSpacing(20)
 
-        heading = QLabel("New Patient Entry")
-        heading.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        root.addWidget(
+            PageHeader(
+                "New Patient",
+                "Enter patient visit details and generate a printable bill.",
+                action=on_back,
+            )
+        )
 
+        form_card = AppCard("Patient Visit Form", "All fields are required for bill generation")
         form = QFormLayout()
+        form.setSpacing(12)
+        form.setLabelAlignment(Qt.AlignLeft)
+
         self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Patient full name")
+
         self.date_input = QDateEdit()
         self.date_input.setDate(QDate.currentDate())
         self.date_input.setDisplayFormat("dd-MM-yyyy")
@@ -235,30 +305,34 @@ class NewPatientPage(QWidget):
         self.treatment_input.addItems(TREATMENTS)
 
         self.amount_input = QLineEdit()
-        self.amount_input.setPlaceholderText("Enter amount in INR")
+        self.amount_input.setPlaceholderText("e.g. 1500")
 
         self.payment_input = QComboBox()
         self.payment_input.addItems(PAYMENT_METHODS)
 
-        form.addRow("Patient name", self.name_input)
+        form.addRow("Patient Name", self.name_input)
         form.addRow("Date", self.date_input)
         form.addRow("Treatment", self.treatment_input)
         form.addRow("Amount (₹)", self.amount_input)
-        form.addRow("Payment method", self.payment_input)
+        form.addRow("Payment Method", self.payment_input)
 
-        button_row = QHBoxLayout()
-        save_btn = QPushButton("Save & Generate Bill")
-        back_btn = QPushButton("Back")
-        save_btn.clicked.connect(self.save_patient)
+        form_card.layout.addLayout(form)
+
+        action_row = QHBoxLayout()
+        action_row.addStretch(1)
+        back_btn = QPushButton("Cancel")
+        back_btn.setObjectName("secondaryButton")
         back_btn.clicked.connect(self.on_back)
-        button_row.addWidget(save_btn)
-        button_row.addWidget(back_btn)
 
-        root.addWidget(heading)
-        root.addSpacing(10)
-        root.addLayout(form)
-        root.addSpacing(10)
-        root.addLayout(button_row)
+        save_btn = QPushButton("Save & Generate Bill")
+        save_btn.setObjectName("primaryButton")
+        save_btn.clicked.connect(self.save_patient)
+
+        action_row.addWidget(back_btn)
+        action_row.addWidget(save_btn)
+        form_card.layout.addLayout(action_row)
+
+        root.addWidget(form_card)
         root.addStretch(1)
 
     def save_patient(self) -> None:
@@ -294,30 +368,31 @@ class NewPatientPage(QWidget):
 
 
 class BillsListPage(QWidget):
-    def __init__(self, fm: FileManager, title: str, on_back, search_mode: bool = False):
+    def __init__(self, fm: FileManager, title: str, subtitle: str, on_back, search_mode: bool = False):
         super().__init__()
         self.fm = fm
         self.search_mode = search_mode
 
-        layout = QVBoxLayout(self)
-        heading = QLabel(title)
-        heading.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        layout.addWidget(heading)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(34, 30, 34, 30)
+        root.setSpacing(20)
+
+        root.addWidget(PageHeader(title, subtitle, action=on_back))
+
+        list_card = AppCard("Bills", "Double-click any entry to open the PDF bill")
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Enter patient name (min 2 characters)")
+        self.search_input.setPlaceholderText("Search by patient name (minimum 2 characters)")
         self.search_input.textChanged.connect(self.refresh_list)
-
         if self.search_mode:
-            layout.addWidget(self.search_input)
+            list_card.layout.addWidget(self.search_input)
 
         self.list_widget = QListWidget()
         self.list_widget.itemDoubleClicked.connect(self.open_selected_bill)
-        layout.addWidget(self.list_widget)
+        list_card.layout.addWidget(self.list_widget)
 
-        back_btn = QPushButton("Back")
-        back_btn.clicked.connect(on_back)
-        layout.addWidget(back_btn)
+        root.addWidget(list_card)
+        root.addStretch(1)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -368,25 +443,34 @@ class RecordsPage(QWidget):
         super().__init__()
         self.fm = fm
 
-        layout = QVBoxLayout(self)
-        heading = QLabel("Records")
-        heading.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        root = QVBoxLayout(self)
+        root.setContentsMargins(34, 30, 34, 30)
+        root.setSpacing(20)
+
+        root.addWidget(
+            PageHeader(
+                "Records",
+                "Access master records document and patient bill folders.",
+                action=on_back,
+            )
+        )
+
+        records_card = AppCard("Record Tools", "Open documents and folders from local storage")
 
         open_records_btn = QPushButton("Open MASTER_RECORDS.docx")
+        open_records_btn.setObjectName("primaryButton")
         open_records_btn.clicked.connect(self.open_records)
 
         open_patients_btn = QPushButton("Open Patients Folder")
+        open_patients_btn.setObjectName("secondaryButton")
         open_patients_btn.clicked.connect(self.open_patients_folder)
 
-        back_btn = QPushButton("Back")
-        back_btn.clicked.connect(on_back)
+        records_card.layout.addWidget(open_records_btn)
+        records_card.layout.addWidget(open_patients_btn)
+        records_card.layout.addStretch(1)
 
-        layout.addWidget(heading)
-        layout.addSpacing(10)
-        layout.addWidget(open_records_btn)
-        layout.addWidget(open_patients_btn)
-        layout.addStretch(1)
-        layout.addWidget(back_btn)
+        root.addWidget(records_card)
+        root.addStretch(1)
 
     def open_records(self) -> None:
         try:
@@ -407,23 +491,55 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(CLINIC_NAME)
-        self.resize(1200, 800)
+        self.resize(1300, 820)
 
         self.fm = FileManager(Path(__file__).resolve().parent)
 
+        main = QWidget()
+        main_layout = QHBoxLayout(main)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Major UI change: persistent navigation rail for clearer app hierarchy.
+        nav = QFrame()
+        nav.setObjectName("navRail")
+        nav.setFixedWidth(250)
+        nav_layout = QVBoxLayout(nav)
+        nav_layout.setContentsMargins(22, 26, 22, 26)
+        nav_layout.setSpacing(10)
+
+        clinic_label = QLabel(CLINIC_NAME)
+        clinic_label.setObjectName("navClinic")
+        doctor_label = QLabel(DOCTOR_NAME)
+        doctor_label.setObjectName("navDoctor")
+        doctor_label.setWordWrap(True)
+
+        nav_layout.addWidget(clinic_label)
+        nav_layout.addWidget(doctor_label)
+        nav_layout.addSpacing(12)
+
         self.stack = QStackedWidget()
-        self.setCentralWidget(self.stack)
 
         self.dashboard = DashboardPage(
-            on_new=lambda: self.stack.setCurrentWidget(self.new_patient_page),
-            on_search=lambda: self.stack.setCurrentWidget(self.search_page),
-            on_bills=lambda: self.stack.setCurrentWidget(self.view_bills_page),
-            on_records=lambda: self.stack.setCurrentWidget(self.records_page),
+            on_new=lambda: self.switch_page(self.new_patient_page),
+            on_search=lambda: self.switch_page(self.search_page),
+            on_bills=lambda: self.switch_page(self.view_bills_page),
+            on_records=lambda: self.switch_page(self.records_page),
         )
-
         self.new_patient_page = NewPatientPage(self.fm, self.go_home)
-        self.search_page = BillsListPage(self.fm, "Search Patient Bills", self.go_home, search_mode=True)
-        self.view_bills_page = BillsListPage(self.fm, "All Patient Bills", self.go_home)
+        self.search_page = BillsListPage(
+            self.fm,
+            "Search Patient",
+            "Search by patient name and open matching bills.",
+            self.go_home,
+            search_mode=True,
+        )
+        self.view_bills_page = BillsListPage(
+            self.fm,
+            "View Bills",
+            "View all generated bills across patients.",
+            self.go_home,
+        )
         self.records_page = RecordsPage(self.fm, self.go_home)
 
         self.stack.addWidget(self.dashboard)
@@ -431,46 +547,212 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.search_page)
         self.stack.addWidget(self.view_bills_page)
         self.stack.addWidget(self.records_page)
-        self.stack.setCurrentWidget(self.dashboard)
 
+        nav_items = [
+            ("Dashboard", self.dashboard),
+            ("New Patient", self.new_patient_page),
+            ("Search Patient", self.search_page),
+            ("View Bills", self.view_bills_page),
+            ("Records", self.records_page),
+        ]
+
+        self.nav_buttons: dict[QPushButton, QWidget] = {}
+        for label, page in nav_items:
+            btn = QPushButton(label)
+            btn.setObjectName("navButton")
+            btn.clicked.connect(lambda _, p=page: self.switch_page(p))
+            nav_layout.addWidget(btn)
+            self.nav_buttons[btn] = page
+
+        nav_layout.addStretch(1)
+
+        content = QFrame()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.addWidget(self.stack)
+
+        main_layout.addWidget(nav)
+        main_layout.addWidget(content, 1)
+
+        self.setCentralWidget(main)
+        self.switch_page(self.dashboard)
         self.showMaximized()
 
+    def switch_page(self, page: QWidget) -> None:
+        self.stack.setCurrentWidget(page)
+        for button, target_page in self.nav_buttons.items():
+            button.setProperty("active", target_page is page)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+
     def go_home(self):
-        self.stack.setCurrentWidget(self.dashboard)
+        self.switch_page(self.dashboard)
 
 
 def apply_dark_theme(app: QApplication) -> None:
     app.setStyleSheet(
         """
         QWidget {
-            background-color: #121417;
-            color: #E8EDF2;
+            background-color: #0f1318;
+            color: #eaf0f6;
+            font-size: 14px;
+            font-family: 'Segoe UI';
+        }
+
+        QFrame#navRail {
+            background-color: #111b25;
+            border-right: 1px solid #243342;
+        }
+
+        QLabel#navClinic {
+            font-size: 18px;
+            font-weight: 700;
+            color: #f5fbff;
+        }
+
+        QLabel#navDoctor {
+            color: #99aec3;
+            font-size: 12px;
+        }
+
+        QPushButton#navButton {
+            text-align: left;
+            padding: 11px 14px;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            background-color: transparent;
+            color: #d9e4ef;
+            font-weight: 600;
+        }
+
+        QPushButton#navButton:hover {
+            background-color: #192633;
+            border: 1px solid #2c3d4f;
+        }
+
+        QPushButton#navButton[active="true"] {
+            background-color: #213246;
+            border: 1px solid #4f7aa0;
+            color: #ffffff;
+        }
+
+        QFrame#card {
+            background-color: #151d27;
+            border: 1px solid #243343;
+            border-radius: 14px;
+        }
+
+        QLabel#cardTitle {
+            font-size: 17px;
+            font-weight: 700;
+            color: #f2f7fb;
+        }
+
+        QLabel#cardSubtitle {
+            color: #9fb2c4;
+            font-size: 13px;
+        }
+
+        QLabel#pageTitle {
+            font-size: 24px;
+            font-weight: 700;
+            color: #f4f8fc;
+        }
+
+        QLabel#pageSubtitle {
+            color: #9cb0c3;
+            font-size: 13px;
+        }
+
+        QLabel#heroTitle {
+            font-size: 28px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        QLabel#heroSubtitle {
+            color: #b6c7d7;
             font-size: 14px;
         }
-        QLabel {
-            color: #F0F4F8;
-        }
+
         QPushButton {
-            background-color: #1F2A36;
-            border: 1px solid #2D3A46;
+            border: 1px solid #304353;
             border-radius: 10px;
-            padding: 10px;
+            padding: 10px 14px;
+            background-color: #202d3b;
+            color: #edf4fb;
+            font-weight: 600;
         }
+
         QPushButton:hover {
-            background-color: #2A3947;
+            background-color: #2a3a4a;
+            border: 1px solid #42627e;
         }
+
         QPushButton:pressed {
-            background-color: #18212B;
+            background-color: #1a2530;
         }
-        QLineEdit, QDateEdit, QComboBox, QListWidget {
-            background-color: #1A2028;
-            border: 1px solid #2F3C48;
+
+        QPushButton#primaryButton, QPushButton#primaryAction {
+            background-color: #2d7ff9;
+            border: 1px solid #3a90ff;
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        QPushButton#primaryButton:hover, QPushButton#primaryAction:hover {
+            background-color: #3f8eff;
+        }
+
+        QPushButton#secondaryButton {
+            background-color: #1e2a36;
+            border: 1px solid #344b60;
+        }
+
+        QPushButton#dashboardAction {
+            text-align: left;
+            padding: 14px;
+        }
+
+        QPushButton#primaryAction {
+            text-align: left;
+            padding: 14px;
+        }
+
+        QLineEdit, QDateEdit, QComboBox {
+            background-color: #0f1822;
+            border: 1px solid #34495d;
+            border-radius: 9px;
+            padding: 8px 10px;
+            min-height: 22px;
+            color: #eaf2fb;
+        }
+
+        QLineEdit:focus, QDateEdit:focus, QComboBox:focus {
+            border: 1px solid #4a9dff;
+            background-color: #101c28;
+        }
+
+        QListWidget {
+            background-color: #0f1822;
+            border: 1px solid #34495d;
+            border-radius: 9px;
+            padding: 6px;
+        }
+
+        QListWidget::item {
+            padding: 10px 8px;
             border-radius: 8px;
-            padding: 8px;
-            color: #E8EDF2;
         }
+
+        QListWidget::item:hover {
+            background-color: #1d2b39;
+        }
+
         QListWidget::item:selected {
-            background-color: #31485E;
+            background-color: #2b4560;
+            color: #ffffff;
         }
         """
     )
@@ -478,6 +760,7 @@ def apply_dark_theme(app: QApplication) -> None:
 
 def main() -> int:
     app = QApplication(sys.argv)
+    app.setFont(QFont("Segoe UI", 10))
     apply_dark_theme(app)
 
     window = MainWindow()
