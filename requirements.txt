@@ -1,6 +1,4 @@
 opencv-python
 numpy
-mss
-pandas
 pyyaml
-pyautogui
+playwright

@@ -1,31 +1,28 @@
-# Copy to config.yaml and edit for your monitor/chart layout
-screen:
-  monitor: 1
-  region:
-    left: 200
-    top: 120
-    width: 1280
-    height: 720
+# Copy to config.yaml and adjust values
+browser:
+  url: "https://quotex.com/en/trade"
+  user_data_dir: ".quotex_profile"
+  viewport:
+    width: 1400
+    height: 900
+  slow_mo_ms: 0
 
 chart:
   timeframe_seconds: 60
   max_candles: 120
   bullish_bgr_min: [20, 120, 20]
-  bullish_bgr_max: [140, 255, 140]
+  bullish_bgr_max: [160, 255, 160]
   bearish_bgr_min: [20, 20, 120]
-  bearish_bgr_max: [140, 140, 255]
+  bearish_bgr_max: [160, 160, 255]
 
 prediction:
   min_confidence_alert: 75
   trend_lookback: 20
   support_resistance_lookback: 80
-  process_every_n_frames: 2
 
 logging:
   enabled: true
   file: predictions_log.csv
 
 ui:
-  show_overlay: true
-  window_name: Quotex CV Bot
-  font_scale: 0.6
+  window_name: "Quotex CV Bot"
