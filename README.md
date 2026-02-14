@@ -1,16 +1,21 @@
-# Quotex CV Bot (Login Inside App)
+# Qxbroker / Quotex CV Bot (Revised)
 
-> ⚠️ For education / paper-trading only. Do **not** assume predictions are profitable.
+> ⚠️ Educational / paper-trading only.
 
-This version fixes the "centering" problem by letting you log in directly from the app-controlled browser and then select the chart area once with your mouse.
+This revised version is for your `qxbroker.com` case where you see:
+- "Performing security verification"
+- "This website uses a security service..."
 
-## What changed
+## What changed in this revision
 
-- Opens Quotex in a browser launched by the app (you log in there directly).
-- No manual desktop coordinate hunting needed.
-- One-time ROI selector (`cv2.selectROI`) for chart area alignment.
-- Real-time prediction overlay with CALL/PUT, confidence, timer.
-- Audio alerts + hotkeys + CSV logging.
+- Default URL changed to `https://qxbroker.com/en/trade`.
+- Added an explicit **manual security verification wait step** before analysis starts.
+- Kept in-app login flow (browser opened by app).
+- Keeps one-time ROI selection so centering is easier.
+
+## Important note about verification pages
+
+The bot does **not** bypass anti-bot security. You must complete any challenge manually in the opened browser window. After it clears and your chart is visible, press Enter in terminal.
 
 ## Install
 
@@ -27,9 +32,10 @@ python -m playwright install chromium
 cp config.example.yaml config.yaml
 ```
 
-Adjust:
-- `chart.timeframe_seconds` to your candle duration.
-- candle color thresholds if your theme differs.
+If needed, tune:
+- `browser.security_wait_timeout_seconds`
+- candle color thresholds under `chart`
+- `chart.timeframe_seconds`
 
 ## Run
 
@@ -37,23 +43,16 @@ Adjust:
 python quotex_cv_bot.py
 ```
 
-Flow:
-1. App opens Quotex in Chromium.
-2. Log in from that browser window.
+Runtime flow:
+1. App opens browser at qxbroker.
+2. Complete security verification/login manually.
 3. Press Enter in terminal.
-4. Drag-select chart region once.
-5. Bot starts analysis/overlay.
+4. Drag-select chart area once.
+5. Bot starts live analysis.
 
 ## Hotkeys
 
-- `S`: pause/resume predictions
-- `L`: toggle logging
-- `+/-`: alert threshold up/down
-- `Q` / `Esc`: quit
-
-## Notes
-
-- Template matching is included as a lightweight candle-shape score.
-- Support/resistance + trend + pattern are combined into confidence.
-- Always test with paper trading first.
-
+- `S` pause/resume
+- `L` toggle CSV logging
+- `+/-` adjust alert threshold
+- `Q` quit

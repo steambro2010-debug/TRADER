@@ -1,11 +1,13 @@
 # Copy to config.yaml and adjust values
 browser:
-  url: "https://quotex.com/en/trade"
-  user_data_dir: ".quotex_profile"
+  url: "https://qxbroker.com/en/trade"
+  user_data_dir: ".qxbroker_profile"
+  channel: "chrome"
   viewport:
     width: 1400
     height: 900
   slow_mo_ms: 0
+  security_wait_timeout_seconds: 300
 
 chart:
   timeframe_seconds: 60
@@ -25,4 +27,4 @@ logging:
   file: predictions_log.csv
 
 ui:
-  window_name: "Quotex CV Bot"
+  window_name: "Qxbroker CV Bot"

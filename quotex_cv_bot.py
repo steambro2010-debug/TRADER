@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 import yaml
-from playwright.sync_api import BrowserContext, Page, sync_playwright
+from playwright.sync_api import BrowserContext, Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 
 @dataclass
@@ -31,14 +31,16 @@ class Prediction:
 
 
 class QuotexWebApp:
-    """Launches Quotex in an app-controlled browser so login happens inside the app."""
+    """Launch qxbroker/Quotex in app browser and allow manual verification/login."""
 
     def __init__(self, cfg: dict):
-        self.cfg = cfg
-        self.user_data_dir = cfg["browser"]["user_data_dir"]
-        self.url = cfg["browser"]["url"]
-        self.viewport = cfg["browser"]["viewport"]
-        self.slow_mo = int(cfg["browser"].get("slow_mo_ms", 0))
+        bcfg = cfg["browser"]
+        self.user_data_dir = bcfg["user_data_dir"]
+        self.url = bcfg["url"]
+        self.viewport = bcfg["viewport"]
+        self.slow_mo = int(bcfg.get("slow_mo_ms", 0))
+        self.channel = bcfg.get("channel", "chrome")
+        self.security_timeout = int(bcfg.get("security_wait_timeout_seconds", 300))
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
 
@@ -47,21 +49,48 @@ class QuotexWebApp:
         self.context = self._playwright.chromium.launch_persistent_context(
             user_data_dir=self.user_data_dir,
             headless=False,
+            channel=self.channel,
             viewport={"width": int(self.viewport["width"]), "height": int(self.viewport["height"])},
             slow_mo=self.slow_mo,
+            args=["--disable-blink-features=AutomationControlled"],
         )
-        if self.context.pages:
-            self.page = self.context.pages[0]
-        else:
-            self.page = self.context.new_page()
-        self.page.goto(self.url)
+        self.context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
+        self.page.goto(self.url, wait_until="domcontentloaded")
+
+    def wait_for_manual_security_clear(self):
+        """Wait until anti-bot interstitial is gone; user solves it manually in browser."""
+        assert self.page is not None
+
+        print("If you see a security verification page, complete it manually in the browser window.")
+        deadline = time.time() + self.security_timeout
+        markers = [
+            "performing security verification",
+            "verifies you are not a bot",
+            "security service",
+        ]
+
+        while time.time() < deadline:
+            try:
+                self.page.wait_for_timeout(1000)
+                text = self.page.inner_text("body").lower()[:5000]
+            except PlaywrightTimeoutError:
+                continue
+            except Exception:
+                continue
+
+            if any(m in text for m in markers):
+                continue
+
+            return
+
+        print("Security verification still detected/timed out. You can keep trying manually, then press Enter.")
 
     def capture_frame(self) -> np.ndarray:
         assert self.page is not None
         png_bytes = self.page.screenshot(full_page=False)
         arr = np.frombuffer(png_bytes, dtype=np.uint8)
-        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        return frame
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
     def close(self):
         if self.context:
@@ -87,18 +116,15 @@ class CandleExtractor:
         bull_mask = cv2.morphologyEx(bull_mask, cv2.MORPH_OPEN, kernel)
         bear_mask = cv2.morphologyEx(bear_mask, cv2.MORPH_OPEN, kernel)
 
-        candles: List[Candle] = []
-        candles.extend(self._from_mask(bull_mask, is_bullish=True))
-        candles.extend(self._from_mask(bear_mask, is_bullish=False))
+        candles = self._from_mask(bull_mask, True) + self._from_mask(bear_mask, False)
         candles.sort(key=lambda c: c.x)
 
         merged: List[Candle] = []
         for c in candles:
             if not merged or abs(c.x - merged[-1].x) > 4:
                 merged.append(c)
-            else:
-                if abs(c.low - c.high) > abs(merged[-1].low - merged[-1].high):
-                    merged[-1] = c
+            elif abs(c.low - c.high) > abs(merged[-1].low - merged[-1].high):
+                merged[-1] = c
 
         return merged[-self.max_candles :]
 
@@ -114,12 +140,7 @@ class CandleExtractor:
             low = float(y + h)
             body_top = float(y + h * 0.25)
             body_bottom = float(y + h * 0.75)
-
-            if is_bullish:
-                open_, close_ = body_bottom, body_top
-            else:
-                open_, close_ = body_top, body_bottom
-
+            open_, close_ = (body_bottom, body_top) if is_bullish else (body_top, body_bottom)
             out.append(Candle(x=x + w // 2, open=open_, high=high, low=low, close=close_, is_bullish=is_bullish))
         return out
 
@@ -129,9 +150,7 @@ class PatternDetector:
     def detect(candles: List[Candle]) -> str:
         if len(candles) < 2:
             return "NONE"
-
-        c = candles[-1]
-        p = candles[-2]
+        c, p = candles[-1], candles[-2]
         body = abs(c.close - c.open)
         wick = abs(c.low - c.high)
         upper = max(0.0, min(c.open, c.close) - c.high)
@@ -144,23 +163,16 @@ class PatternDetector:
 
         p_top, p_bottom = min(p.open, p.close), max(p.open, p.close)
         c_top, c_bottom = min(c.open, c.close), max(c.open, c.close)
-
         if (not p.is_bullish) and c.is_bullish and c_top <= p_top and c_bottom >= p_bottom:
             return "BULLISH_ENGULFING"
         if p.is_bullish and (not c.is_bullish) and c_top <= p_top and c_bottom >= p_bottom:
             return "BEARISH_ENGULFING"
-
         return "NONE"
 
 
 class TemplateMatcher:
-    """Lightweight template matching to satisfy visual candle matching requirement."""
-
     def __init__(self):
-        self.templates = {
-            "SMALL_BODY": self._small_body_template(),
-            "LONG_BODY": self._long_body_template(),
-        }
+        self.templates = [self._small_body_template(), self._long_body_template()]
 
     @staticmethod
     def _small_body_template() -> np.ndarray:
@@ -184,10 +196,9 @@ class TemplateMatcher:
         _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         best = 0.0
-        for tpl in self.templates.values():
+        for tpl in self.templates:
             tpl_resized = cv2.resize(tpl, (bw.shape[1], bw.shape[0]))
-            res = cv2.matchTemplate(bw, tpl_resized, cv2.TM_CCOEFF_NORMED)
-            best = max(best, float(res.max()))
+            best = max(best, float(cv2.matchTemplate(bw, tpl_resized, cv2.TM_CCOEFF_NORMED).max()))
         return best
 
 
@@ -197,17 +208,14 @@ class Analyzer:
         if not candles:
             return None, None
         sample = candles[-lookback:]
-        lows = [c.low for c in sample]
-        highs = [c.high for c in sample]
-        return float(np.percentile(lows, 20)), float(np.percentile(highs, 80))
+        return float(np.percentile([c.low for c in sample], 20)), float(np.percentile([c.high for c in sample], 80))
 
     @staticmethod
     def trend_score(candles: List[Candle], lookback: int) -> float:
         if len(candles) < max(5, lookback // 2):
             return 0.0
         closes = np.array([c.close for c in candles[-lookback:]], dtype=np.float32)
-        x = np.arange(len(closes), dtype=np.float32)
-        slope = np.polyfit(x, closes, 1)[0]
+        slope = np.polyfit(np.arange(len(closes), dtype=np.float32), closes, 1)[0]
         return float(np.tanh(slope / 2.5))
 
 
@@ -246,7 +254,6 @@ class Predictor:
         direction = "CALL" if bias >= 0 else "PUT"
         confidence = round(50 + abs(bias) * 50, 1)
         eta = max(1, self.timeframe_seconds - int(time.time() % self.timeframe_seconds))
-
         return Prediction(direction, confidence, eta, pattern, ",".join(reasons))
 
 
@@ -266,32 +273,31 @@ class Logger:
 
 
 def select_chart_roi(frame: np.ndarray) -> Tuple[int, int, int, int]:
-    print("Select chart area in the screenshot window and press ENTER.")
-    roi = cv2.selectROI("Select Quotex Chart", frame, showCrosshair=True)
-    cv2.destroyWindow("Select Quotex Chart")
+    print("Select chart area and press ENTER/SPACE.")
+    roi = cv2.selectROI("Select Qxbroker Chart", frame, showCrosshair=True)
+    cv2.destroyWindow("Select Qxbroker Chart")
     x, y, w, h = map(int, roi)
     if w <= 0 or h <= 0:
-        raise RuntimeError("Invalid ROI selection.")
+        raise RuntimeError("Invalid ROI selection")
     return x, y, w, h
 
 
 def draw_overlay(frame: np.ndarray, pred: Prediction, sr: Tuple[Optional[float], Optional[float]], active: bool):
     support, resistance = sr
     out = frame.copy()
-    h, w = out.shape[:2]
-
+    _, w = out.shape[:2]
     cv2.rectangle(out, (0, 0), (w, 95), (15, 15, 15), -1)
+
     col = (80, 220, 80) if pred.direction == "CALL" else (80, 80, 220)
     cv2.putText(out, f"Status: {'RUNNING' if active else 'PAUSED'}", (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (230, 230, 230), 1)
     cv2.putText(out, f"Signal: {pred.direction}   Confidence: {pred.confidence:.1f}%", (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.65, col, 2)
     cv2.putText(out, f"Next candle: {pred.eta_seconds}s   Pattern: {pred.pattern}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (220, 220, 220), 1)
-    cv2.putText(out, "Hotkeys: S pause/resume | Q quit | L log on/off | +/- alert threshold", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (170, 170, 170), 1)
+    cv2.putText(out, "Hotkeys: S pause | Q quit | L log | +/- alert", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (170, 170, 170), 1)
 
     if support is not None:
         cv2.line(out, (0, int(support)), (w, int(support)), (0, 200, 200), 1)
     if resistance is not None:
         cv2.line(out, (0, int(resistance)), (w, int(resistance)), (200, 200, 0), 1)
-
     return out
 
 
@@ -320,13 +326,10 @@ def main():
     logger = Logger(cfg["logging"]["enabled"], cfg["logging"]["file"])
 
     web.start()
-    print("Log in to Quotex in the browser window opened by this app.")
-    input("After login and chart setup, press ENTER to continue...")
+    web.wait_for_manual_security_clear()
+    input("After you complete verification/login and chart is visible, press ENTER...")
 
-    first_frame = web.capture_frame()
-    roi = select_chart_roi(first_frame)
-    x, y, w, h = roi
-
+    x, y, w, h = select_chart_roi(web.capture_frame())
     active = True
     alert_threshold = int(cfg["prediction"]["min_confidence_alert"])
     last_alert_sec = -1
@@ -334,7 +337,6 @@ def main():
     while True:
         frame = web.capture_frame()
         chart = frame[y : y + h, x : x + w]
-
         pred = Prediction("CALL", 50.0, cfg["chart"]["timeframe_seconds"], "NONE", "paused")
         sr = (None, None)
 
@@ -346,10 +348,8 @@ def main():
 
             tpl_score = 0.0
             if candles:
-                c = candles[-1]
-                cx = int(np.clip(c.x, 8, chart.shape[1] - 8))
-                patch = chart[:, max(0, cx - 8) : min(chart.shape[1], cx + 8)]
-                tpl_score = matcher.match_score(patch)
+                cx = int(np.clip(candles[-1].x, 8, chart.shape[1] - 8))
+                tpl_score = matcher.match_score(chart[:, max(0, cx - 8) : min(chart.shape[1], cx + 8)])
 
             pred = predictor.predict(candles, trend, sr, pattern, tpl_score)
             logger.write(pred)
@@ -359,9 +359,7 @@ def main():
                 beep()
                 last_alert_sec = now
 
-        overlay = draw_overlay(chart, pred, sr, active)
-        cv2.imshow(cfg["ui"]["window_name"], overlay)
-
+        cv2.imshow(cfg["ui"]["window_name"], draw_overlay(chart, pred, sr, active))
         key = cv2.waitKey(1) & 0xFF
         if key in (ord("q"), 27):
             break
@@ -369,13 +367,10 @@ def main():
             active = not active
         if key in (ord("+"), ord("=")):
             alert_threshold = min(100, alert_threshold + 1)
-            print(f"alert threshold={alert_threshold}")
         if key in (ord("-"), ord("_")):
             alert_threshold = max(0, alert_threshold - 1)
-            print(f"alert threshold={alert_threshold}")
         if key == ord("l"):
             logger.enabled = not logger.enabled
-            print(f"logging {'ON' if logger.enabled else 'OFF'}")
 
     cv2.destroyAllWindows()
     web.close()
