@@ -50,8 +50,15 @@ class MarketIntelligencePipeline:
             pt_mult=float(cfg["training"]["labeling"]["pt_mult"]),
             sl_mult=float(cfg["training"]["labeling"]["sl_mult"]),
             max_holding_bars=int(cfg["training"]["labeling"]["max_holding_bars"]),
+            neutral_move_mult=float(cfg["training"]["labeling"].get("neutral_move_mult", 0.35)),
         )
-        self.log.info("labels_built", extra={"stage": "labeling"})
+        label_counts = labeled["label"].value_counts().to_dict()
+        self.log.info(f"labels_built counts={label_counts}", extra={"stage": "labeling"})
+        if len(label_counts) < 3:
+            raise ValueError(
+                "Label generation produced fewer than 3 classes. "
+                f"counts={label_counts}. Tune labeling.neutral_move_mult / pt_mult / sl_mult."
+            )
 
         feature_cols = [
             c
@@ -81,20 +88,28 @@ class MarketIntelligencePipeline:
 
         # walk-forward diagnostics
         wf_losses = []
-        for tr_idx, te_idx in walk_forward_splits(train_df, n_splits=3):
+        for fold_idx, (tr_idx, te_idx) in enumerate(walk_forward_splits(train_df, n_splits=3), start=1):
             tr = train_df.iloc[tr_idx]
             te = train_df.iloc[te_idx]
+            if tr["label"].nunique() < 3:
+                raise ValueError(
+                    f"Walk-forward fold {fold_idx} training split has <3 classes: "
+                    f"counts={tr['label'].value_counts().to_dict()}"
+                )
             m = EnsembleModel(cfg["models"]["tree"])
             m.fit(tr, feature_cols)
             p, _ = m.predict_proba(te)
+            if p.shape[1] != 3:
+                raise ValueError(f"Fold {fold_idx} predict_proba returned invalid shape {p.shape}, expected (N,3)")
             y = te["label"].values
-            # safe pseudo log-loss with clipping
             p_clip = np.clip(p, 1e-6, 1 - 1e-6)
             ll = -np.mean(np.log(p_clip[np.arange(len(y)), y]))
             wf_losses.append(float(ll))
         self.log.info(f"walk_forward_logloss={np.mean(wf_losses):.6f}", extra={"stage": "validate"})
 
         probs, un = model.predict_proba(test_df)
+        if probs.shape[1] != 3:
+            raise ValueError(f"Main predict_proba returned invalid shape {probs.shape}, expected (N,3)")
         risk = RiskEngine(cfg)
 
         positions = []

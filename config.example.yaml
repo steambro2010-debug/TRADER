@@ -14,6 +14,7 @@ training:
     pt_mult: 1.4
     sl_mult: 1.0
     max_holding_bars: 24
+    neutral_move_mult: 0.35
 
 models:
   tree:

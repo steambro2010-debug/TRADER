@@ -72,3 +72,18 @@ python main.py --config config.yaml --input example_ohlcv.csv --output engine_ou
 - No code executes on import.
 - Entrypoint guard is enforced in both `main.py` and wrapper.
 - Structured logs are emitted per stage.
+
+
+## Label/Ensemble class guarantees
+
+The training pipeline enforces strict 3-class semantics:
+- `0 = Short`
+- `1 = Long`
+- `2 = No-trade`
+
+Safety checks now fail early if:
+- label generation does not contain all 3 classes
+- any walk-forward training fold drops a class
+- ensemble probability output is not shape `(N, 3)`
+
+Tune `training.labeling.neutral_move_mult` (with `pt_mult/sl_mult`) to control no-trade class density.
