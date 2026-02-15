@@ -1,20 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib.util
+
 import numpy as np
 import pandas as pd
-
-
-try:
-    from xgboost import XGBClassifier  # type: ignore
-except Exception:  # pragma: no cover
-    XGBClassifier = None
-
-try:
-    from lightgbm import LGBMClassifier  # type: ignore
-except Exception:  # pragma: no cover
-    LGBMClassifier = None
-
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 
 
@@ -26,26 +17,45 @@ class Prediction:
 
 
 class HybridMLModel:
-    def __init__(self) -> None:
-        self.model = self._build_model()
+    def __init__(self, advanced_lstm: bool = False) -> None:
+        self.advanced_lstm = advanced_lstm
+        self.model = self._build_tabular_model()
         self.feature_cols: list[str] = []
         self.fitted = False
 
-    def _build_model(self):
-        if XGBClassifier is not None:
-            return XGBClassifier(n_estimators=120, max_depth=4, learning_rate=0.06, subsample=0.9, colsample_bytree=0.9)
-        if LGBMClassifier is not None:
-            return LGBMClassifier(n_estimators=160, learning_rate=0.05, num_leaves=31)
-        return RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42)
+    def _build_tabular_model(self):
+        if importlib.util.find_spec("xgboost") is not None:
+            from xgboost import XGBClassifier
+
+            base = XGBClassifier(
+                n_estimators=220,
+                max_depth=4,
+                learning_rate=0.05,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                objective="binary:logistic",
+                eval_metric="logloss",
+            )
+        elif importlib.util.find_spec("lightgbm") is not None:
+            from lightgbm import LGBMClassifier
+
+            base = LGBMClassifier(
+                n_estimators=260,
+                learning_rate=0.04,
+                num_leaves=31,
+                objective="binary",
+            )
+        else:
+            base = RandomForestClassifier(n_estimators=300, max_depth=8, random_state=42)
+        return CalibratedClassifierCV(base, cv=3, method="sigmoid")
 
     def fit(self, features: pd.DataFrame) -> None:
         df = features.dropna().copy()
-        if len(df) < 120:
+        if len(df) < 200:
             return
         df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
         df = df.dropna()
-
-        ignore = {"ts", "direction", "target"}
+        ignore = {"timestamp", "asset", "timeframe", "target", "direction"}
         cols = [c for c in df.columns if c not in ignore]
         x = df[cols]
         y = df["target"]
@@ -56,9 +66,8 @@ class HybridMLModel:
     def predict(self, features: pd.DataFrame) -> Prediction:
         if (not self.fitted) or features.empty:
             return Prediction(50.0, 50.0, self.model.__class__.__name__)
-
         row = features[self.feature_cols].tail(1)
         probs = self.model.predict_proba(row)[0]
         up = float(probs[1] * 100)
         down = float(probs[0] * 100)
-        return Prediction(prob_up=up, prob_down=down, model_name=self.model.__class__.__name__)
+        return Prediction(up, down, self.model.__class__.__name__)

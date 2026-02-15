@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 from ml_model.hybrid_model import Prediction
@@ -12,63 +11,44 @@ from ml_model.hybrid_model import Prediction
 class Signal:
     direction: str
     confidence: float
-    indicator_score: float
-    pattern_score: float
-    ml_score: float
-    reason: str
+    model_probability: float
+    indicator_bias: float
+    diagnostics: dict[str, float]
 
 
 class SignalGenerator:
-    def _candlestick_pattern_score(self, df: pd.DataFrame) -> tuple[float, str]:
-        if len(df) < 3:
-            return 0.5, "insufficient pattern data"
-        c = df.iloc[-1]
-        p = df.iloc[-2]
-        body = abs(c["close"] - c["open"])
-        span = max(c["high"] - c["low"], 1e-9)
-        upper_wick = c["high"] - max(c["close"], c["open"])
-        lower_wick = min(c["close"], c["open"]) - c["low"]
+    def indicator_bias(self, row: pd.Series) -> float:
+        bullish = 0
+        bearish = 0
+        bullish += int(row["ema_9"] > row["ema_21"])
+        bearish += int(row["ema_9"] <= row["ema_21"])
+        bullish += int(row["macd"] > row["macd_signal"])
+        bearish += int(row["macd"] <= row["macd_signal"])
+        bullish += int(row["rsi_14"] > 50)
+        bearish += int(row["rsi_14"] <= 50)
+        bullish += int(row["stoch_k"] > row["stoch_d"])
+        bearish += int(row["stoch_k"] <= row["stoch_d"])
+        return (bullish - bearish) / max(bullish + bearish, 1)
 
-        if body / span < 0.15:
-            return 0.52, "doji"
-        if c["close"] > c["open"] and p["close"] < p["open"] and c["close"] >= p["open"] and c["open"] <= p["close"]:
-            return 0.78, "bullish engulfing"
-        if c["close"] < c["open"] and p["close"] > p["open"] and c["open"] >= p["close"] and c["close"] <= p["open"]:
-            return 0.22, "bearish engulfing"
-        if lower_wick > body * 2 and upper_wick < body:
-            return 0.7, "hammer"
-        if upper_wick > body * 2 and lower_wick < body:
-            return 0.3, "shooting star"
-        return 0.5, "neutral candle"
-
-    def _indicator_score(self, row: pd.Series) -> float:
-        signals = []
-        signals.append(1 if row["ema_9"] > row["ema_21"] else 0)
-        signals.append(1 if row["macd"] > row["macd_signal"] else 0)
-        signals.append(1 if row["close"] > row["bb_mid"] else 0)
-        signals.append(1 if row["rsi_14"] < 70 else 0)
-        signals.append(1 if row["stoch_k"] > row["stoch_d"] else 0)
-        signals.append(1 if row["close"] > row["support"] else 0)
-        signals.append(1 if row["adx_14"] > 20 else 0.5)
-        return float(np.mean(signals))
-
-    def generate(self, features: pd.DataFrame, ml_pred: Prediction) -> Signal:
+    def generate(self, features: pd.DataFrame, prediction: Prediction) -> Signal:
         row = features.iloc[-1]
-        indicator = self._indicator_score(row)
-        pattern, reason = self._candlestick_pattern_score(features)
-        ml_score = ml_pred.prob_up / 100
+        bias = self.indicator_bias(row)
+        model_up = prediction.prob_up / 100
+        adjusted_up = min(max(model_up + (0.05 * bias), 0.0), 1.0)
 
-        confidence_up = (0.4 * indicator) + (0.2 * pattern) + (0.4 * ml_score)
-        confidence = confidence_up * 100
-        direction = "UP" if confidence_up >= 0.5 else "DOWN"
-        if direction == "DOWN":
-            confidence = (1 - confidence_up) * 100
+        direction = "UP" if adjusted_up >= 0.5 else "DOWN"
+        confidence = adjusted_up if direction == "UP" else (1 - adjusted_up)
+        model_prob_direction = model_up if direction == "UP" else (1 - model_up)
 
         return Signal(
             direction=direction,
-            confidence=float(confidence),
-            indicator_score=indicator,
-            pattern_score=pattern,
-            ml_score=ml_score,
-            reason=reason,
+            confidence=confidence * 100,
+            model_probability=model_prob_direction * 100,
+            indicator_bias=bias,
+            diagnostics={
+                "prob_up": prediction.prob_up,
+                "prob_down": prediction.prob_down,
+                "rsi": float(row["rsi_14"]),
+                "adx": float(row["adx_14"]),
+            },
         )

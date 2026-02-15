@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, field
-from pathlib import Path
+from dataclasses import asdict, dataclass, field
 import json
+from pathlib import Path
 
 
 CONFIG_PATH = Path("config.json")
@@ -20,12 +20,11 @@ class RiskConfig:
 @dataclass
 class RuntimeConfig:
     quotex_url: str = "https://quotex.com/en"
-    capture_fps: int = 15
     min_confidence: float = 75.0
-    history_size: int = 500
+    history_size: int = 1200
     auto_trade_enabled: bool = False
     debug: bool = True
-    region: tuple[int, int, int, int] | None = None
+    websocket_reconnect_seconds: int = 5
 
 
 @dataclass
@@ -40,9 +39,10 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         save_config(cfg, path)
         return cfg
     raw = json.loads(path.read_text())
-    runtime = RuntimeConfig(**raw.get("runtime", {}))
-    risk = RiskConfig(**raw.get("risk", {}))
-    return AppConfig(runtime=runtime, risk=risk)
+    return AppConfig(
+        runtime=RuntimeConfig(**raw.get("runtime", {})),
+        risk=RiskConfig(**raw.get("risk", {})),
+    )
 
 
 def save_config(config: AppConfig, path: Path = CONFIG_PATH) -> None:

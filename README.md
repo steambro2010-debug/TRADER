@@ -1,20 +1,20 @@
-# Quotex Screen-Driven Trading Bot
+# Quotex Browser-Embedded Trading Engine
 
-## Overview
-This project implements a modular, asynchronous trading system for Quotex when no public API is available. It captures live chart pixels, reconstructs candles, computes indicators, generates hybrid rule+ML predictions, and optionally executes binary-option trades.
+## What Changed
+This project no longer uses screen scraping, OpenCV, MSS, or pixel-based candle reconstruction.
+It now embeds a Chromium engine (PyQt6 WebEngine), hooks WebSocket traffic/JS state, and extracts structured market data directly from live page objects.
 
 ## Architecture
-- `data_capture/`: low-latency screen capture via MSS + OpenCV
-- `data_processing/`: candle extraction and OHLC approximation
-- `indicators/`: vectorized technical indicators (EMA, SMA, RSI, MACD, BB, ATR, Stochastic, S/R, ADX)
-- `ml_model/`: hybrid ML probability model (XGBoost/LightGBM fallback)
-- `strategy/`: pattern engine + confidence aggregation
-- `execution/`: risk filters and trade execution logging
-- `gui/`: transparent always-on-top PySide overlay
-- `core/`: async orchestration loop
-- `utils/`: config persistence and logging
+- `data_capture/browser_engine.py` — embedded Chromium + JS injection + WebSocket hooks
+- `data_processing/candle_reconstructor.py` — structured candle parser + rolling 1200-candle buffer
+- `indicators/technical.py` — vectorized indicator stack (EMA/SMA/RSI/MACD/BB/ATR/Stochastic/ADX/S/R)
+- `ml_model/hybrid_model.py` — calibrated XGBoost/LightGBM model fallback
+- `strategy/signal_generator.py` — direction + confidence generation grounded in model probabilities
+- `execution/trade_executor.py` — DOM click execution with risk constraints and fail-safe checks
+- `gui/main_window.py` — clean analytics panel with probability bar, threshold slider, trade log, diagnostics
+- `core/orchestrator.py` — threaded packet ingestion, ML inference, watchdog reload, graceful shutdown
 
-## Installation
+## Install
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -26,38 +26,23 @@ pip install -r requirements.txt
 python main.py
 ```
 
-At startup the bot opens the Quotex page in your browser. Set capture region once in `config.json` (`runtime.region: [left, top, width, height]`) for stable low latency.
+## Runtime Flow
+1. Launch embedded Quotex browser.
+2. User logs in manually.
+3. JS hook intercepts `WebSocket.send` and `WebSocket.onmessage`.
+4. Captured packets are bridged to Python via `QWebChannel`.
+5. Candle objects are parsed and buffered (1000+ candles).
+6. Indicators + calibrated ML probabilities generate UP/DOWN predictions.
+7. Optional auto-trade uses DOM click execution.
 
-## Performance Targets
-- Capture-to-prediction target: <150ms
-- End-to-end target: <300ms
-- Rolling buffer: default 500 candles
-- GUI updates non-blocking via separate thread
+## Stability & Safety
+- WebSocket watchdog auto-reloads page on stalled feed.
+- All predictions and trades logged in CSV.
+- Risk limits: confidence threshold, stop-loss streak, max trades/hour, optional martingale.
+- Graceful shutdown via SIGINT.
 
-## Logging
-- `logs/app.log`: runtime logs/errors
-- `logs/predictions.csv`: every prediction + latency
-- `logs/trades.csv`: trade actions and stake sizing
-
-## Debugging
-Set `runtime.debug=true` in `config.json` for verbose logging.
-
-## Auto-Trading Risk Controls
-Configured in `config.json`:
-- confidence threshold
-- fixed capital percentage per trade
-- optional martingale
-- stop-loss streak limit
-- max trades/hour
-
-## Retraining Notes
-The ML model is retrained continuously on rolling live features (`tail(800)` by default). You can tune:
-- model hyperparameters in `ml_model/hybrid_model.py`
-- fit frequency and data window in `core/orchestrator.py`
-
-## Optional GPU Acceleration
-- XGBoost GPU builds can be used by installing a CUDA-enabled package.
-- For LightGBM GPU, compile/install with GPU support and set GPU params in the model config.
+## Notes for Quotex Selectors
+Execution selectors are broker-UI dependent. Update selectors in `execution/trade_executor.py` to match your current Quotex DOM.
 
 ## Disclaimer
-This software is for research/education. Binary options trading is high risk. You are solely responsible for financial outcomes and regulatory compliance.
+Trading binary options is high risk. This software is for research/education only. You are fully responsible for financial and legal outcomes.
