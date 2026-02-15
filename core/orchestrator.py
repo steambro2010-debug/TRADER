@@ -23,6 +23,7 @@ from utils.logger import append_csv
 
 class TradingOrchestrator(QObject):
     prediction_ready = pyqtSignal(object, object, str)
+
     def __init__(self, app: QApplication, config: AppConfig) -> None:
         super().__init__()
         self.app = app
@@ -45,11 +46,13 @@ class TradingOrchestrator(QObject):
         self.packet_queue: queue.Queue[dict] = queue.Queue(maxsize=2000)
         self.executor_pool = ThreadPoolExecutor(max_workers=2)
         self.ml_lock = threading.Lock()
+        self.first_candle_logged = False
 
         self.browser.bridge.packet_received.connect(self._on_packet)
         self.prediction_ready.connect(self._apply_prediction_gui)
         self.browser.page_loaded.connect(self._on_page_loaded)
         self.browser.hook_installed.connect(self._on_hook_status)
+        self.window.panel.force_predict_btn.clicked.connect(self._force_predict)
 
         self.watchdog = QTimer()
         self.watchdog.timeout.connect(self._watchdog)
@@ -101,23 +104,26 @@ class TradingOrchestrator(QObject):
         self.packet_queue.put_nowait(packet)
         self.executor_pool.submit(self._process_latest_packet)
 
+    def _force_predict(self) -> None:
+        self.logger.info("Force Predict clicked")
+        self.executor_pool.submit(self._run_prediction_pipeline, "force", True)
+
     def _manual_prediction_probe(self) -> None:
         try:
             self.logger.info("[TEST_PREDICTION_LOOP] SUCCESS timer_tick")
-            self._run_prediction_pipeline(source="timer")
+            self._run_prediction_pipeline(source="timer", ignore_minimum=False)
         except Exception as exc:
             self.logger.exception("AI ERROR in manual probe: %s", exc)
             print(f"AI ERROR: {exc}")
 
     def _process_latest_packet(self) -> None:
         try:
-            self._run_prediction_pipeline(source="packet")
+            self._run_prediction_pipeline(source="packet", ignore_minimum=False)
         except Exception as exc:
             self.logger.exception("AI ERROR in packet pipeline: %s", exc)
             print(f"AI ERROR: {exc}")
 
-    def _run_prediction_pipeline(self, source: str) -> None:
-        packet = None
+    def _run_prediction_pipeline(self, source: str, ignore_minimum: bool = False) -> None:
         if source == "packet":
             try:
                 packet = self.packet_queue.get_nowait()
@@ -127,19 +133,24 @@ class TradingOrchestrator(QObject):
             candle = self.candles.push_from_packet(packet)
             if candle is None:
                 return
+            if not self.first_candle_logged:
+                self.first_candle_logged = True
+                print(f"First candle: {candle.__dict__}")
+                self.logger.info("First candle: %s", candle.__dict__)
             self._stage_success("CANDLE_PARSED")
 
         buffer_len = len(self.candles.buffer)
         self.logger.info("Candle buffer length: %s", buffer_len)
         print(f"Candle buffer length: {buffer_len}")
 
-        if buffer_len < self.config.runtime.min_candles_for_prediction:
+        min_required = min(self.config.runtime.min_candles_for_prediction, 10)
+        if (not ignore_minimum) and buffer_len < min_required:
             self.window.panel.set_status("Collecting data...")
-            self.logger.info(
-                "Collecting data: %s/%s candles",
-                buffer_len,
-                self.config.runtime.min_candles_for_prediction,
-            )
+            self.logger.info("Collecting data: %s/%s candles", buffer_len, min_required)
+            return
+
+        if buffer_len == 0:
+            self.window.panel.set_status("No candles yet")
             return
 
         df = self.candles.as_dataframe()
@@ -159,6 +170,7 @@ class TradingOrchestrator(QObject):
                 prediction = self.model.predict(features)
 
         self._stage_success("PREDICTION_RETURNED")
+        self.logger.info("Prediction output: up=%.2f down=%.2f model=%s", prediction.prob_up, prediction.prob_down, prediction.model_name)
 
         signal_out = self.strategy.generate(features, prediction)
 

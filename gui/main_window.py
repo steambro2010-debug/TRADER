@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QProgressBar,
+    QPushButton,
     QSlider,
     QTableWidget,
     QTableWidgetItem,
@@ -41,6 +42,9 @@ class AnalyticsPanel(QWidget):
         self.threshold_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.threshold_slider.valueChanged.connect(lambda v: self.threshold_label.setText(f"Threshold: {v}%"))
 
+        self.force_predict_btn = QPushButton("Force Predict")
+        self.force_predict_btn.setToolTip("Run prediction now, ignoring minimum candle requirement")
+
         self.heatmap_label = QLabel("Indicator heatmap: RSI -, ADX -")
         self.heatmap_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -56,6 +60,7 @@ class AnalyticsPanel(QWidget):
         layout.addWidget(self.status_label)
         layout.addWidget(self.conf_bar)
         layout.addLayout(form)
+        layout.addWidget(self.force_predict_btn)
         layout.addWidget(self.heatmap_label)
         layout.addWidget(self.trade_table)
 

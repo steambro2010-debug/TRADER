@@ -28,7 +28,7 @@ class RuntimeConfig:
     hook_injection_delay_seconds: int = 8
     browser_profile_path: str = ".runtime/browser_profile"
     browser_cache_path: str = ".runtime/browser_cache"
-    min_candles_for_prediction: int = 50
+    min_candles_for_prediction: int = 10
     test_prediction_interval_seconds: int = 5
     force_test_prediction_output: bool = False
     browser_user_agent: str = (

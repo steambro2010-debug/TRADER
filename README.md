@@ -56,6 +56,8 @@ python main.py
 - A forced test prediction loop runs every `test_prediction_interval_seconds` (default 5s).
 - Buffer guards show `Collecting data...` until `min_candles_for_prediction` is reached.
 - Set `force_test_prediction_output=true` to force `{up: 65%, down: 35%}` wiring checks.
+- Use the **Force Predict** button to run prediction immediately and bypass minimum-candle guard.
+- The candle parser deduplicates by timestamp and updates the current open candle in-place (no buffer reset on ticks).
 
 ## Config Notes
 `config.json` runtime keys include:
