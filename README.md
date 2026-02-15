@@ -1,87 +1,97 @@
-# Qxbroker / Quotex CV Bot (Lean Survival Architecture)
+# Institutional-Grade Market Structure Intelligence Engine
 
-> ⚠️ Educational / paper-trading only.
+This repository now contains a **research-grade structural market model pipeline** (`institutional_engine.py`) designed for regime-aware probabilistic decisions with uncertainty and capital preservation controls.
 
-This version removes the heavy model and switches to a **survival-grade architecture**:
-- fewer but more robust features
-- strong abstention bias
-- regime-aware confidence gating
-- strict capital-preservation guard
+## Scope
 
-## What changed (major)
+- Input: clean OHLCV data (CSV)
+- Multi-timeframe aggregation: `1x, 3x, 5x, 15x, 1h, 4h`
+- Structural feature engineering (150+ features generated via multi-window/lag stacks)
+- Triple-barrier labeling
+- Ensemble model stack (tree branch + temporal branch + calibration)
+- Regime-aware decisioning with explicit **NO_TRADE** probability
+- Uncertainty-aware filtering
+- Risk intelligence + cost-aware backtesting
 
-- Deleted heavy 5GB memory-bank model and live online weight mutation.
-- Added extraction quality scoring (`quality`, `spacing_cv`, candle count).
-- Added regime classification (`trend_up`, `trend_down`, `range`, `volatile`, `unknown`).
-- Added lean 12-feature model with regime-specific weights and calibrated probabilities.
-- Added abstention gate (quality + regime + confidence thresholds).
-- Added performance guard to auto-pause when live shadow metrics degrade:
-  - max consecutive losses
-  - minimum rolling shadow win rate
-- Kept dual display:
-  - `CURRENT SIGNAL`
-  - `NEXT SIGNAL`
-  - explicit `Decision: TRADE / ABSTAIN(<reason>)`
+## Architecture Highlights
 
-## Why this design
+### 1) Data Architecture
+- Volatility-aware missing candle handling
+- Structural gap/anomaly flags
+- Log returns, volatility-normalized returns, detrended close
+- Fractional differentiation for stationarity-with-memory
+- Multi-timeframe aggregation and feature merge
 
-The previous heavy architecture risked alpha illusion from overfitting noisy visual extraction.
-This design prioritizes:
-1. Data quality first
-2. Selective signal issuance
-3. Edge preservation over trade frequency
-4. Automatic risk-off behavior when quality degrades
+### 2) Structural Features
+Implemented feature families:
+- Trend/structure: rolling R², Hurst approximation, persistence, CUSUM breaks
+- Volatility: multi-window realized vol, vol-of-vol, entropy, ATR stack
+- Momentum hierarchy: ROC tree, RSI stack + derivatives, MACD derivatives, lag autocorrelation stack
+- Candle microstructure: wick asymmetry, close location, compression/expansion state
+- Liquidity/smart-money proxies: sweeps, equal highs/lows, FVG/imbalance, distance-to-level, vacuum probability
+- Regime layer: Gaussian-mixture regime clusters + mapped regime tags
 
-## qxbroker security verification
+### 3) Model Stack
+- Tree branch: random-forest surrogate for production tabular branch (configurable)
+- Temporal branch: sequential embedding branch (lag summary + multinomial head)
+- Ensemble blending + isotonic calibration
+- Outputs: `P(long), P(short), P(no-trade), uncertainty`
 
-If you see:
-- "Performing security verification"
-- "This website uses a security service..."
+### 4) Labeling/Validation Foundations
+- Triple-barrier labeling with volatility-adjusted barriers
+- Time-ordered train/test split (ready for purged walk-forward extension)
+- Cost-aware backtest with spread/slippage/latency controls
 
-Complete verification manually in the opened browser window. The app waits and continues.
+### 5) Uncertainty + Filtering
+- Uncertainty penalization
+- Regime-aware dynamic thresholds
+- Multi-timeframe agreement gate
+- High-uncertainty/high-instability -> force NO_TRADE
 
-## Install
+### 6) Risk Intelligence
+- Kelly-bounded risk multiplier
+- Regime-scaled leverage
+- Drawdown-aware throttling
+- Observation-mode trigger on edge decay conditions
+
+## Usage
+
+1. Install dependencies:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m playwright install chromium
 ```
 
-## Configure
+2. Create config:
 
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-Most important controls:
-- `prediction.min_extraction_quality`
-- `prediction.confidence_threshold_by_regime`
-- `prediction.allow_volatile_regime`
-- `risk.max_consecutive_losses`
-- `risk.min_shadow_win_rate`
-
-## Run
+3. Run pipeline:
 
 ```bash
-python quotex_cv_bot.py
+python institutional_engine.py --config config.yaml --input your_ohlcv.csv --output engine_output.json
 ```
 
-Runtime:
-1. Browser opens qxbroker.
-2. Complete verification/login.
-3. Press Enter in terminal.
-4. Select chart ROI once.
-5. Bot runs with abstention-first logic.
+Input CSV columns required:
+- `timestamp, open, high, low, close`
+- optional: `volume`
 
-## Hotkeys
+## Output Contract
 
-- `S` pause/resume
-- `L` logging on/off
-- `+/-` alert threshold
-- `Q` quit
+For each decision:
+- Regime classification
+- Structural bias
+- Probability long/short/no-trade
+- Uncertainty score
+- Risk multiplier
+- Confidence percentile
+- Recommended position size
 
-## Operational policy
+## Notes
 
-If shadow win-rate and guardrails fail consistently, stop live usage and treat the system as research-only until revalidated.
+- This is a research stack template that is intentionally stringent on abstention and capital protection.
+- Do not treat this as live investment advice.

@@ -1,56 +1,48 @@
-# Copy to config.yaml and adjust values
-browser:
-  url: "https://qxbroker.com/en/trade"
-  user_data_dir: ".qxbroker_profile"
-  channel: "chrome"
-  viewport:
-    width: 1500
-    height: 950
-  slow_mo_ms: 0
-  security_wait_timeout_seconds: 300
+data:
+  base_freq: "1min"
+  timeframes: ["1x", "3x", "5x", "15x", "1h", "4h"]
+  fractional_diff_d: 0.35
 
-chart:
-  timeframe_seconds: 60
-  max_candles: 180
-  bullish_bgr_min: [20, 120, 20]
-  bullish_bgr_max: [170, 255, 170]
-  bearish_bgr_min: [20, 20, 120]
-  bearish_bgr_max: [170, 170, 255]
+features:
+  windows: [8, 16, 32, 64, 128]
 
-prediction:
-  min_confidence_alert: 78
-  support_resistance_lookback: 100
-  min_extraction_quality: 0.72
-  min_candles_required: 60
-  allow_volatile_regime: false
-  confidence_threshold_by_regime:
-    trend_up: 66
-    trend_down: 66
-    range: 72
-    volatile: 85
-    unknown: 85
-  model_bias_by_regime:
-    default: 0.0
-    trend_up: 0.05
-    trend_down: -0.05
+training:
+  train_ratio: 0.75
+  labeling:
+    pt_mult: 1.4
+    sl_mult: 1.0
+    max_holding_bars: 24
 
-model:
-  logit_temperature: 1.5
-  # Lean robust feature weights (12 features)
-  weights:
-    default: [0.70, 0.60, 0.40, -0.35, -0.25, 0.55, 0.40, 0.20, 0.10, 0.15, -0.15, 0.20]
-    trend_up: [0.80, 0.70, 0.50, -0.25, -0.15, 0.65, 0.45, 0.10, 0.10, 0.20, -0.20, 0.20]
-    trend_down: [0.80, 0.70, 0.50, -0.25, -0.15, 0.65, 0.45, 0.10, 0.10, 0.20, -0.20, 0.20]
-    range: [0.35, 0.30, 0.25, -0.40, -0.35, 0.20, 0.35, 0.10, 0.15, 0.25, -0.25, 0.15]
+models:
+  tree:
+    n_estimators: 600
+    max_depth: 9
+    min_samples_leaf: 20
+
+decision:
+  regime_thresholds:
+    default: 0.60
+    trend_expansion: 0.58
+    structured_trend: 0.60
+    range_compression: 0.66
+    volatility_expansion: 0.74
+    transitional: 0.70
+    low_vol_chop: 0.78
+    breakout_precondition: 0.64
+  max_uncertainty: 0.18
+  require_mtf_agreement: true
 
 risk:
-  max_consecutive_losses: 4
-  min_shadow_win_rate: 0.52
-  shadow_window: 80
+  base_risk_unit: 0.01
+  kelly_cap: 0.25
+  max_drawdown: 0.12
+  dd_throttle: 0.8
+  max_consecutive_losses: 5
 
-logging:
-  enabled: true
-  file: predictions_log.csv
+backtest:
+  spread_bps: 1.5
+  slippage_bps: 1.2
+  latency_bars: 1
 
-ui:
-  window_name: "Qxbroker Lean Survival Signals"
+output:
+  last_n_decisions: 50
