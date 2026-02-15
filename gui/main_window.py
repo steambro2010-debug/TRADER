@@ -27,6 +27,7 @@ class AnalyticsPanel(QWidget):
 
         self.direction_label = QLabel("Direction: -")
         self.model_label = QLabel("Model prob: -")
+        self.status_label = QLabel("Status: Waiting for data")
         self.conf_bar = QProgressBar()
         self.conf_bar.setRange(0, 100)
         self.conf_bar.setFormat("Confidence %p%")
@@ -52,10 +53,14 @@ class AnalyticsPanel(QWidget):
 
         layout.addWidget(self.direction_label)
         layout.addWidget(self.model_label)
+        layout.addWidget(self.status_label)
         layout.addWidget(self.conf_bar)
         layout.addLayout(form)
         layout.addWidget(self.heatmap_label)
         layout.addWidget(self.trade_table)
+
+    def set_status(self, text: str) -> None:
+        self.status_label.setText(f"Status: {text}")
 
     def update_signal(self, signal: Signal) -> None:
         self.direction_label.setText(f"Direction: {signal.direction}")
@@ -64,6 +69,7 @@ class AnalyticsPanel(QWidget):
         self.heatmap_label.setText(
             f"Indicator heatmap: RSI {signal.diagnostics.get('rsi', 0):.1f}, ADX {signal.diagnostics.get('adx', 0):.1f}"
         )
+        self.set_status("Prediction active")
 
     def add_trade(self, direction: str, confidence: float, result: str) -> None:
         row = self.trade_table.rowCount()

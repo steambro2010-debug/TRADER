@@ -43,6 +43,20 @@ python main.py
 6. Indicators + calibrated ML probabilities generate UP/DOWN predictions.
 7. Optional auto-trade uses DOM click execution.
 
+
+## AI Diagnostics & Tracing
+- Pipeline stages now emit explicit traces such as:
+  - `[WEBSOCKET_DATA_RECEIVE] SUCCESS`
+  - `[CANDLE_PARSED] SUCCESS`
+  - `[INDICATORS_CALCULATED] SUCCESS`
+  - `[FEATURE_VECTOR_BUILT] SUCCESS`
+  - `[MODEL_INFERENCE_CALLED] SUCCESS`
+  - `[PREDICTION_RETURNED] SUCCESS`
+  - `[GUI_UPDATED] SUCCESS`
+- A forced test prediction loop runs every `test_prediction_interval_seconds` (default 5s).
+- Buffer guards show `Collecting data...` until `min_candles_for_prediction` is reached.
+- Set `force_test_prediction_output=true` to force `{up: 65%, down: 35%}` wiring checks.
+
 ## Config Notes
 `config.json` runtime keys include:
 - `browser_profile_path`

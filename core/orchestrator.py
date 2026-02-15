@@ -7,7 +7,7 @@ import signal
 import threading
 import time
 
-from PyQt6.QtCore import QObject, QTimer, Qt
+from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QApplication
 
 from data_capture.browser_engine import QuotexBrowserEngine
@@ -15,13 +15,14 @@ from data_processing.candle_reconstructor import CandleBuffer
 from execution.trade_executor import TradeExecutor
 from gui.main_window import MainWindow
 from indicators.technical import compute_all
-from ml_model.hybrid_model import HybridMLModel
+from ml_model.hybrid_model import HybridMLModel, Prediction
 from strategy.signal_generator import SignalGenerator
 from utils.config import AppConfig
 from utils.logger import append_csv
 
 
 class TradingOrchestrator(QObject):
+    prediction_ready = pyqtSignal(object, object, str)
     def __init__(self, app: QApplication, config: AppConfig) -> None:
         super().__init__()
         self.app = app
@@ -46,16 +47,29 @@ class TradingOrchestrator(QObject):
         self.ml_lock = threading.Lock()
 
         self.browser.bridge.packet_received.connect(self._on_packet)
+        self.prediction_ready.connect(self._apply_prediction_gui)
         self.browser.page_loaded.connect(self._on_page_loaded)
         self.browser.hook_installed.connect(self._on_hook_status)
 
         self.watchdog = QTimer()
         self.watchdog.timeout.connect(self._watchdog)
         self.watchdog.start(3000)
+
+        self.prediction_probe = QTimer()
+        self.prediction_probe.timeout.connect(self._manual_prediction_probe)
+        self.prediction_probe.start(max(1, self.config.runtime.test_prediction_interval_seconds) * 1000)
+
         self.last_packet_ts = time.time()
         self.has_seen_market_packets = False
         self.hook_active = False
         self.watchdog_miss_count = 0
+
+        self.logger.info("[THREADING] SUCCESS worker_pool_started max_workers=2")
+
+    def _stage_success(self, stage: str) -> None:
+        msg = f"[{stage}] SUCCESS"
+        self.logger.info(msg)
+        print(msg)
 
     def start(self) -> None:
         self.window.show()
@@ -81,44 +95,94 @@ class TradingOrchestrator(QObject):
         if packet_type.startswith("ws_"):
             self.last_packet_ts = time.time()
             self.has_seen_market_packets = True
+            self._stage_success("WEBSOCKET_DATA_RECEIVE")
         if self.packet_queue.full():
             _ = self.packet_queue.get_nowait()
         self.packet_queue.put_nowait(packet)
         self.executor_pool.submit(self._process_latest_packet)
 
+    def _manual_prediction_probe(self) -> None:
+        try:
+            self.logger.info("[TEST_PREDICTION_LOOP] SUCCESS timer_tick")
+            self._run_prediction_pipeline(source="timer")
+        except Exception as exc:
+            self.logger.exception("AI ERROR in manual probe: %s", exc)
+            print(f"AI ERROR: {exc}")
+
     def _process_latest_packet(self) -> None:
         try:
-            packet = self.packet_queue.get_nowait()
-        except queue.Empty:
-            return
+            self._run_prediction_pipeline(source="packet")
+        except Exception as exc:
+            self.logger.exception("AI ERROR in packet pipeline: %s", exc)
+            print(f"AI ERROR: {exc}")
 
-        candle = self.candles.push_from_packet(packet)
-        if candle is None:
+    def _run_prediction_pipeline(self, source: str) -> None:
+        packet = None
+        if source == "packet":
+            try:
+                packet = self.packet_queue.get_nowait()
+            except queue.Empty:
+                return
+
+            candle = self.candles.push_from_packet(packet)
+            if candle is None:
+                return
+            self._stage_success("CANDLE_PARSED")
+
+        buffer_len = len(self.candles.buffer)
+        self.logger.info("Candle buffer length: %s", buffer_len)
+        print(f"Candle buffer length: {buffer_len}")
+
+        if buffer_len < self.config.runtime.min_candles_for_prediction:
+            self.window.panel.set_status("Collecting data...")
+            self.logger.info(
+                "Collecting data: %s/%s candles",
+                buffer_len,
+                self.config.runtime.min_candles_for_prediction,
+            )
             return
 
         df = self.candles.as_dataframe()
         features = compute_all(df)
+        self._stage_success("INDICATORS_CALCULATED")
+
+        latest_feature = features.tail(1).to_dict(orient="records")
+        self.logger.debug("Feature vector sample: %s", latest_feature[0] if latest_feature else {})
+        self._stage_success("FEATURE_VECTOR_BUILT")
 
         with self.ml_lock:
-            self.model.fit(features.tail(1200))
-            prediction = self.model.predict(features)
+            self._stage_success("MODEL_INFERENCE_CALLED")
+            if self.config.runtime.force_test_prediction_output:
+                prediction = Prediction(prob_up=65.0, prob_down=35.0, model_name="ForcedTestOutput")
+            else:
+                self.model.fit(features.tail(1200))
+                prediction = self.model.predict(features)
+
+        self._stage_success("PREDICTION_RETURNED")
+
         signal_out = self.strategy.generate(features, prediction)
 
         append_csv(
             "predictions.csv",
             {
-                "timestamp": candle.timestamp,
-                "asset": candle.asset,
-                "timeframe": candle.timeframe,
+                "timestamp": time.time(),
+                "asset": str(df.iloc[-1].get("asset", "UNKNOWN")),
+                "timeframe": str(df.iloc[-1].get("timeframe", "1m")),
                 "direction": signal_out.direction,
                 "confidence": signal_out.confidence,
                 "prob_up": prediction.prob_up,
                 "prob_down": prediction.prob_down,
+                "source": source,
             },
-            headers=["timestamp", "asset", "timeframe", "direction", "confidence", "prob_up", "prob_down"],
+            headers=["timestamp", "asset", "timeframe", "direction", "confidence", "prob_up", "prob_down", "source"],
         )
 
+        self.prediction_ready.emit(signal_out, prediction, source)
+
+    @pyqtSlot(object, object, str)
+    def _apply_prediction_gui(self, signal_out, prediction, source: str) -> None:
         self.window.panel.update_signal(signal_out)
+        self._stage_success("GUI_UPDATED")
 
         auto_enabled = self.window.panel.auto_toggle.isChecked() or self.config.runtime.auto_trade_enabled
         threshold = float(self.window.panel.threshold_slider.value())
@@ -153,5 +217,6 @@ class TradingOrchestrator(QObject):
 
     def shutdown(self) -> None:
         self.watchdog.stop()
+        self.prediction_probe.stop()
         self.executor_pool.shutdown(wait=False, cancel_futures=True)
         self.app.quit()

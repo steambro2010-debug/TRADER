@@ -28,6 +28,9 @@ class RuntimeConfig:
     hook_injection_delay_seconds: int = 8
     browser_profile_path: str = ".runtime/browser_profile"
     browser_cache_path: str = ".runtime/browser_cache"
+    min_candles_for_prediction: int = 50
+    test_prediction_interval_seconds: int = 5
+    force_test_prediction_output: bool = False
     browser_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
