@@ -205,20 +205,22 @@ class AnalyticsPanel(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, browser_widget: QWidget) -> None:
+    def __init__(self, browser_widget: QWidget | None) -> None:
         super().__init__()
         self.setWindowTitle("Quotex AI Trading Intelligence")
         self.resize(1680, 940)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        browser_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setFocusProxy(browser_widget)
+        if browser_widget is not None:
+            browser_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            self.setFocusProxy(browser_widget)
 
         self.panel = AnalyticsPanel()
 
         central = QWidget()
         central.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout = QHBoxLayout(central)
-        layout.addWidget(browser_widget, 4)
-        layout.addWidget(self.panel, 2)
+        if browser_widget is not None:
+            layout.addWidget(browser_widget, 4)
+        layout.addWidget(self.panel, 2 if browser_widget is not None else 1)
         self.setCentralWidget(central)

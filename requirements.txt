@@ -6,3 +6,5 @@ lightgbm
 PyQt6
 PyQt6-WebEngine
 psutil
+opencv-python
+mss

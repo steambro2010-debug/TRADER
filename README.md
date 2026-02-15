@@ -1,86 +1,50 @@
-# Quotex Browser-Embedded Trading Engine
+# Quotex Vision-Driven Trading Intelligence Engine
 
-## What Changed
-This project no longer uses screen scraping, OpenCV, MSS, or pixel-based candle reconstruction.
-It embeds Chromium via PyQt6 WebEngine, captures structured network/state data, and processes it in Python.
+## Overview
+This build uses **region-based screen capture + computer vision** to reconstruct OHLC candles from the Quotex chart.
+The vision stack is engineered for low CPU, long runtime stability, and thread-safe AI triggering.
 
-## Browser Stability (Chrome-like behavior)
-- Uses a **persistent** `QWebEngineProfile` with dedicated storage/cache paths.
-- Uses a realistic Chrome user agent string.
-- Enables persistent cookies, local storage, cache, WebGL and GPU-accelerated canvas.
-- Delays WebSocket hook injection (`hook_injection_delay_seconds`, default 8s) to avoid early-page JS instability.
-- Adds hook retry/backoff + WebChannel bootstrap fallback when bridge is not ready on first attempt.
-- Logs JavaScript console messages for CSP/auth/WebSocket debugging.
-- Watchdog reloads only after confirmed WS activity followed by repeated stale intervals (prevents refresh loops before login).
+## Data Acquisition Architecture
+- `data_capture/capture.py` — MSS region capture (10–15 FPS), user region selection, background thread.
+- `data_capture/vision.py` — grayscale + blur + Canny + contour filtering pipeline for candle body/wick detection.
+- `data_capture/candle_tracker.py` — rightmost-candle tracking + candle-shift closure logic.
+- `data_capture/data_buffer.py` — validated rolling OHLC buffer (1000 default) with smoothing.
+- `core/ai_engine.py` — indicator + model inference engine (trigger on candle close or interval).
+- `core/orchestrator.py` — thread-safe orchestration, UI signal emission, debug mode overlay.
 
-## Architecture
-- `data_capture/browser_engine.py` — embedded Chromium + persistent profile + delayed JS injection + WebSocket hooks
-- `data_processing/candle_reconstructor.py` — structured candle parser + rolling 1200-candle buffer
-- `indicators/technical.py` — vectorized indicator stack (EMA/SMA/RSI/MACD/BB/ATR/Stochastic/ADX/S/R)
-- `ml_model/hybrid_model.py` — calibrated XGBoost/LightGBM model fallback
-- `strategy/signal_generator.py` — direction + confidence generation grounded in model probabilities
-- `execution/trade_executor.py` — DOM click execution with risk constraints and fail-safe checks
-- `gui/main_window.py` — analytics panel with probability bar, threshold slider, trade log, diagnostics
-- `core/orchestrator.py` — threaded packet ingestion, ML inference, guarded watchdog reload, graceful shutdown
+## CV Pipeline
+1. Capture only chart ROI (saved in `config.json`).
+2. Convert frame to grayscale.
+3. Gaussian blur.
+4. Canny edges.
+5. Contour detection + shape filtering (ratio, min height, body width constraints).
+6. Wick/body extraction for pixel OHLC.
+7. Track rightmost candle; finalize previous candle when chart shifts.
+8. Validate/smooth OHLC and append to rolling buffer.
 
-## Install
+## Runtime Guarantees
+- Capture thread is separate from processing/UI.
+- AI receives only stable finalized OHLC data.
+- Buffer is never reset during updates.
+- Prediction runs on new candle close or periodic timer.
+- Debug mode can show overlays + processing time.
+
+## Run
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-## Run
-```bash
 python main.py
 ```
 
-## Runtime Flow
-1. Launch embedded Quotex browser.
-2. User logs in manually.
-3. Bridge initializes; hook is injected after delay.
-4. WebSocket packets are bridged to Python via `QWebChannel`.
-5. Candle objects are parsed and buffered (1000+ candles).
-6. Indicators + calibrated ML probabilities generate UP/DOWN predictions.
-7. Optional auto-trade uses DOM click execution.
+On first run, select chart ROI once. Region is persisted to config.
 
-
-## AI Diagnostics & Tracing
-- Pipeline stages now emit explicit traces such as:
-  - `[WEBSOCKET_DATA_RECEIVE] SUCCESS`
-  - `[CANDLE_PARSED] SUCCESS`
-  - `[INDICATORS_CALCULATED] SUCCESS`
-  - `[FEATURE_VECTOR_BUILT] SUCCESS`
-  - `[MODEL_INFERENCE_CALLED] SUCCESS`
-  - `[PREDICTION_RETURNED] SUCCESS`
-  - `[GUI_UPDATED] SUCCESS`
-- A forced test prediction loop runs every `test_prediction_interval_seconds` (default 5s).
-- Buffer guards show `Collecting data...` until `min_candles_for_prediction` is reached.
-- Set `force_test_prediction_output=true` to force `{up: 65%, down: 35%}` wiring checks.
-- Use the **Force Predict** button to run prediction immediately and bypass minimum-candle guard.
-- The candle parser deduplicates by timestamp and updates the current open candle in-place (no buffer reset on ticks).
-
-
-## UI Dashboard
-- Modern dark trading-intelligence layout with card-based sections and gradient styling.
-- Dominant AI Status card: Direction, Confidence, Status, Model mode.
-- Animated UP/DOWN probability bars with green/red visual encoding.
-- Collapsible indicator chip row: RSI, MACD histogram, ADX, volatility, trend bias.
-- Scrollable trade log with conditional row coloring (win/loss).
-- Health header: CPU, FPS, latency, and candle buffer size.
-- Dynamic statuses:
-  - `AI warming model (fallback probabilities)`
-  - `Collecting data: N / min candles`
-  - `Analyzing…`
-  - `AI Ready` / `Weak Signal`
-
-## Config Notes
-`config.json` runtime keys include:
-- `browser_profile_path`
-- `browser_cache_path`
-- `browser_user_agent`
-- `hook_injection_delay_seconds`
-- `websocket_reconnect_seconds`
+## Debug Mode
+Set `runtime.debug_vision=true`:
+- Candle outlines
+- Wick lines
+- Buffer count
+- Frame processing ms
 
 ## Disclaimer
-Trading binary options is high risk. This software is for research/education only. You are fully responsible for financial and legal outcomes.
+Binary options are high-risk. This tool is for research/education only.

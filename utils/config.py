@@ -21,21 +21,15 @@ class RiskConfig:
 class RuntimeConfig:
     quotex_url: str = "https://quotex.com/en"
     min_confidence: float = 75.0
-    history_size: int = 1200
+    history_size: int = 1000
     auto_trade_enabled: bool = False
     debug: bool = True
-    websocket_reconnect_seconds: int = 45
-    hook_injection_delay_seconds: int = 8
-    browser_profile_path: str = ".runtime/browser_profile"
-    browser_cache_path: str = ".runtime/browser_cache"
-    min_candles_for_prediction: int = 10
+    debug_vision: bool = False
+    capture_fps: int = 12
+    capture_region: tuple[int, int, int, int] | None = None
+    min_candles_for_prediction: int = 50
     test_prediction_interval_seconds: int = 5
     force_test_prediction_output: bool = False
-    browser_user_agent: str = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    )
 
 
 @dataclass
