@@ -73,7 +73,15 @@ cp config.example.yaml config.yaml
 3. Run pipeline:
 
 ```bash
-python institutional_engine.py --config config.yaml --input your_ohlcv.csv --output engine_output.json
+python institutional_engine.py --config config.yaml --input path/to/your_real_ohlcv.csv --output engine_output.json
+```
+
+
+If you do not have a file yet, generate a template:
+
+```bash
+python institutional_engine.py --example-csv
+python institutional_engine.py --config config.yaml --input example_ohlcv.csv --output engine_output.json
 ```
 
 Input CSV columns required:

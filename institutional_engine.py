@@ -69,11 +69,24 @@ class DataArchitecture:
         self.frac_diff_d = float(cfg["data"]["fractional_diff_d"])
 
     def load_ohlcv(self, csv_path: str) -> pd.DataFrame:
-        df = pd.read_csv(csv_path)
+        path = Path(csv_path)
+        if not path.exists():
+            csv_candidates = sorted(Path.cwd().glob("*.csv"))
+            hint = "\n".join(f"  - {c}" for c in csv_candidates[:10]) if csv_candidates else "  (no CSV files found in current directory)"
+            raise FileNotFoundError(
+                f"Input file not found: {csv_path}\n"
+                "You likely used the README placeholder value. Replace `your_ohlcv.csv` with a real file path.\n"
+                f"CSV files detected in current directory:\n{hint}"
+            )
+
+        df = pd.read_csv(path)
         required = {"timestamp", "open", "high", "low", "close"}
         missing = required - set(df.columns)
         if missing:
-            raise ValueError(f"Missing required columns: {sorted(missing)}")
+            raise ValueError(
+                f"Missing required columns: {sorted(missing)}. "
+                "Expected at least: ['timestamp','open','high','low','close'] (volume optional)."
+            )
 
         if "volume" not in df.columns:
             df["volume"] = 0.0
@@ -672,13 +685,35 @@ def run_pipeline(cfg: dict, csv_path: str, output_path: str):
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Institutional-grade market structure intelligence engine")
     p.add_argument("--config", default="config.yaml")
-    p.add_argument("--input", required=True, help="Path to OHLCV CSV")
+    p.add_argument("--input", required=True, help="Path to OHLCV CSV (replace README placeholder)")
     p.add_argument("--output", default="engine_output.json")
+    p.add_argument("--example-csv", action="store_true", help="Generate example_ohlcv.csv template and exit")
     return p.parse_args()
+
+
+def write_example_csv(path: str = "example_ohlcv.csv"):
+    ts = pd.date_range("2024-01-01", periods=120, freq="1min", tz="UTC")
+    base = 100 + np.cumsum(np.random.normal(0, 0.05, size=len(ts)))
+    df = pd.DataFrame(
+        {
+            "timestamp": ts,
+            "open": base,
+            "high": base + np.random.uniform(0.02, 0.08, size=len(ts)),
+            "low": base - np.random.uniform(0.02, 0.08, size=len(ts)),
+            "close": base + np.random.normal(0, 0.03, size=len(ts)),
+            "volume": np.random.randint(50, 400, size=len(ts)),
+        }
+    )
+    df.to_csv(path, index=False)
 
 
 def main():
     args = parse_args()
+    if args.example_csv:
+        write_example_csv()
+        print("Wrote example_ohlcv.csv. Run the engine with --input example_ohlcv.csv")
+        return
+
     with Path(args.config).open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
