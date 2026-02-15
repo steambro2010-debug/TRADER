@@ -59,6 +59,19 @@ python main.py
 - Use the **Force Predict** button to run prediction immediately and bypass minimum-candle guard.
 - The candle parser deduplicates by timestamp and updates the current open candle in-place (no buffer reset on ticks).
 
+
+## UI Dashboard
+- Modern dark trading-intelligence layout with card-based sections and gradient styling.
+- Dominant AI Status card: Direction, Confidence, Status, Model mode.
+- Animated UP/DOWN probability bars with green/red visual encoding.
+- Collapsible indicator chip row: RSI, MACD histogram, ADX, volatility, trend bias.
+- Scrollable trade log with conditional row coloring (win/loss).
+- Health header: CPU, FPS, latency, and candle buffer size.
+- Dynamic statuses:
+  - `Collecting data: N / min candles`
+  - `Analyzing…`
+  - `AI Ready` / `Weak Signal`
+
 ## Config Notes
 `config.json` runtime keys include:
 - `browser_profile_path`

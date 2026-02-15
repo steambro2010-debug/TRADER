@@ -22,7 +22,7 @@ from utils.logger import append_csv
 
 
 class TradingOrchestrator(QObject):
-    prediction_ready = pyqtSignal(object, object, str)
+    prediction_ready = pyqtSignal(dict)
 
     def __init__(self, app: QApplication, config: AppConfig) -> None:
         super().__init__()
@@ -63,11 +63,20 @@ class TradingOrchestrator(QObject):
         self.prediction_probe.start(max(1, self.config.runtime.test_prediction_interval_seconds) * 1000)
 
         self.last_packet_ts = time.time()
+        self.last_predict_ts = time.time()
         self.has_seen_market_packets = False
         self.hook_active = False
         self.watchdog_miss_count = 0
 
         self.logger.info("[THREADING] SUCCESS worker_pool_started max_workers=2")
+
+    def _cpu_percent(self) -> float:
+        try:
+            import psutil  # type: ignore
+
+            return float(psutil.cpu_percent(interval=None))
+        except Exception:
+            return 0.0
 
     def _stage_success(self, stage: str) -> None:
         msg = f"[{stage}] SUCCESS"
@@ -124,6 +133,7 @@ class TradingOrchestrator(QObject):
             print(f"AI ERROR: {exc}")
 
     def _run_prediction_pipeline(self, source: str, ignore_minimum: bool = False) -> None:
+        t0 = time.perf_counter()
         if source == "packet":
             try:
                 packet = self.packet_queue.get_nowait()
@@ -145,20 +155,23 @@ class TradingOrchestrator(QObject):
 
         min_required = min(self.config.runtime.min_candles_for_prediction, 10)
         if (not ignore_minimum) and buffer_len < min_required:
-            self.window.panel.set_status("Collecting data...")
-            self.logger.info("Collecting data: %s/%s candles", buffer_len, min_required)
+            self.prediction_ready.emit(
+                {
+                    "status": f"Collecting data: {buffer_len} / {min_required} candles",
+                    "buffer_len": buffer_len,
+                    "cpu": self._cpu_percent(),
+                    "fps": 1.0 / max(time.time() - self.last_packet_ts, 1e-6),
+                    "latency_ms": (time.perf_counter() - t0) * 1000,
+                }
+            )
             return
 
         if buffer_len == 0:
-            self.window.panel.set_status("No candles yet")
             return
 
         df = self.candles.as_dataframe()
         features = compute_all(df)
         self._stage_success("INDICATORS_CALCULATED")
-
-        latest_feature = features.tail(1).to_dict(orient="records")
-        self.logger.debug("Feature vector sample: %s", latest_feature[0] if latest_feature else {})
         self._stage_success("FEATURE_VECTOR_BUILT")
 
         with self.ml_lock:
@@ -170,9 +183,9 @@ class TradingOrchestrator(QObject):
                 prediction = self.model.predict(features)
 
         self._stage_success("PREDICTION_RETURNED")
-        self.logger.info("Prediction output: up=%.2f down=%.2f model=%s", prediction.prob_up, prediction.prob_down, prediction.model_name)
-
         signal_out = self.strategy.generate(features, prediction)
+        row = features.iloc[-1]
+        latency_ms = (time.perf_counter() - t0) * 1000
 
         append_csv(
             "predictions.csv",
@@ -189,23 +202,64 @@ class TradingOrchestrator(QObject):
             headers=["timestamp", "asset", "timeframe", "direction", "confidence", "prob_up", "prob_down", "source"],
         )
 
-        self.prediction_ready.emit(signal_out, prediction, source)
+        now = time.time()
+        fps = 1.0 / max(now - self.last_predict_ts, 1e-6)
+        self.last_predict_ts = now
+        self.prediction_ready.emit(
+            {
+                "status": "Analyzing…",
+                "direction": signal_out.direction,
+                "confidence": signal_out.confidence,
+                "prob_up": prediction.prob_up,
+                "prob_down": prediction.prob_down,
+                "model_mode": prediction.model_name,
+                "indicators": {
+                    "rsi": float(row.get("rsi_14", 0.0)),
+                    "macd_hist": float(row.get("macd_hist", 0.0)),
+                    "adx": float(row.get("adx_14", 0.0)),
+                    "volatility": float(row.get("volatility_10", 0.0)),
+                    "trend_bias": float(signal_out.indicator_bias),
+                },
+                "buffer_len": buffer_len,
+                "cpu": self._cpu_percent(),
+                "fps": fps,
+                "latency_ms": latency_ms,
+                "auto_enabled": self.window.panel.auto_toggle.isChecked() or self.config.runtime.auto_trade_enabled,
+                "threshold": float(self.window.panel.threshold_slider.value()),
+            }
+        )
 
-    @pyqtSlot(object, object, str)
-    def _apply_prediction_gui(self, signal_out, prediction, source: str) -> None:
-        self.window.panel.update_signal(signal_out)
+    @pyqtSlot(dict)
+    def _apply_prediction_gui(self, payload: dict) -> None:
+        self.window.panel.set_metrics(
+            float(payload.get("cpu", 0.0)),
+            float(payload.get("fps", 0.0)),
+            float(payload.get("latency_ms", 0.0)),
+            int(payload.get("buffer_len", 0)),
+        )
+        self.window.panel.set_status(str(payload.get("status", "Analyzing…")))
+
+        if "direction" not in payload:
+            return
+
+        self.window.panel.update_dashboard(
+            direction=str(payload.get("direction", "-")),
+            confidence=float(payload.get("confidence", 0.0)),
+            prob_up=float(payload.get("prob_up", 0.0)),
+            prob_down=float(payload.get("prob_down", 0.0)),
+            model_mode=str(payload.get("model_mode", "Hybrid")),
+            indicators=dict(payload.get("indicators", {})),
+        )
         self._stage_success("GUI_UPDATED")
 
-        auto_enabled = self.window.panel.auto_toggle.isChecked() or self.config.runtime.auto_trade_enabled
-        threshold = float(self.window.panel.threshold_slider.value())
-        if auto_enabled:
+        if bool(payload.get("auto_enabled", False)):
             decision = self.executor.execute(
-                signal_out.direction,
-                signal_out.confidence,
-                threshold,
+                str(payload.get("direction", "UP")),
+                float(payload.get("confidence", 0.0)),
+                float(payload.get("threshold", self.window.panel.threshold_slider.value())),
                 self.browser.evaluate_js,
             )
-            self.window.panel.add_trade(signal_out.direction, signal_out.confidence, decision.reason)
+            self.window.panel.add_trade(str(payload.get("direction", "UP")), float(payload.get("confidence", 0.0)), decision.reason)
 
     def _watchdog(self) -> None:
         if not self.hook_active:
