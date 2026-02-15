@@ -107,3 +107,12 @@ For each decision:
 
 - This is a research stack template that is intentionally stringent on abstention and capital protection.
 - Do not treat this as live investment advice.
+
+
+## PowerShell quickstart
+
+```powershell
+cp config.example.yaml config.yaml
+python institutional_engine.py --example-csv
+python institutional_engine.py --config config.yaml --input example_ohlcv.csv --output engine_output.json
+```

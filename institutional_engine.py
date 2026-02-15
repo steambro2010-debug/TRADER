@@ -103,11 +103,21 @@ class DataArchitecture:
         if not path.exists():
             csv_candidates = sorted(Path.cwd().glob("*.csv"))
             hint = "\n".join(f"  - {c}" for c in csv_candidates[:10]) if csv_candidates else "  (no CSV files found in current directory)"
-            raise FileNotFoundError(
-                f"Input file not found: {csv_path}\n"
-                "You likely used the README placeholder value. Replace `your_ohlcv.csv` with a real file path.\n"
-                f"CSV files detected in current directory:\n{hint}"
-            )
+            raw_norm = csv_path.replace("\\", "/").strip().lower()
+            placeholders = {"your_ohlcv.csv", "path/to/your_real_ohlcv.csv", "path/to/your_real_ohlcv.csv"}
+            if raw_norm in placeholders:
+                msg = (
+                    f"Input file not found: {csv_path}\n"
+                    "You used a README placeholder path. Replace it with a real CSV path or run `python institutional_engine.py --example-csv`.\n"
+                    f"CSV files detected in current directory:\n{hint}"
+                )
+            else:
+                msg = (
+                    f"Input file not found: {csv_path}\n"
+                    "Pass a valid CSV path to --input, or generate a template via `python institutional_engine.py --example-csv`.\n"
+                    f"CSV files detected in current directory:\n{hint}"
+                )
+            raise FileNotFoundError(msg)
 
         df = pd.read_csv(path)
         required = {"timestamp", "open", "high", "low", "close"}
@@ -715,7 +725,7 @@ def run_pipeline(cfg: dict, csv_path: str, output_path: str):
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Institutional-grade market structure intelligence engine")
     p.add_argument("--config", default="config.yaml")
-    p.add_argument("--input", required=True, help="Path to OHLCV CSV (replace README placeholder)")
+    p.add_argument("--input", help="Path to OHLCV CSV (replace README placeholder)")
     p.add_argument("--output", default="engine_output.json")
     p.add_argument("--example-csv", action="store_true", help="Generate example_ohlcv.csv template and exit")
     return p.parse_args()
@@ -743,6 +753,9 @@ def main():
         write_example_csv()
         print("Wrote example_ohlcv.csv. Run the engine with --input example_ohlcv.csv")
         return
+
+    if not args.input:
+        raise SystemExit("Missing required --input. Provide a real OHLCV CSV path, or run with --example-csv first.")
 
     with Path(args.config).open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
