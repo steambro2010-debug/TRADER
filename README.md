@@ -1,31 +1,36 @@
-# Qxbroker / Quotex CV Bot (Dual Signal + Heavy Local AI)
+# Qxbroker / Quotex CV Bot (Lean Survival Architecture)
 
 > ⚠️ Educational / paper-trading only.
 
-This revised version now shows:
-- **Current signal** (what it sees right now)
-- **Next signal** (prediction for next candle)
+This version removes the heavy model and switches to a **survival-grade architecture**:
+- fewer but more robust features
+- strong abstention bias
+- regime-aware confidence gating
+- strict capital-preservation guard
 
-It also upgrades the local model into a much heavier architecture with an optional **~5GB on-disk memory bank**.
+## What changed (major)
 
-## What changed
-
-- Added dual signal outputs:
+- Deleted heavy 5GB memory-bank model and live online weight mutation.
+- Added extraction quality scoring (`quality`, `spacing_cv`, candle count).
+- Added regime classification (`trend_up`, `trend_down`, `range`, `volatile`, `unknown`).
+- Added lean 12-feature model with regime-specific weights and calibrated probabilities.
+- Added abstention gate (quality + regime + confidence thresholds).
+- Added performance guard to auto-pause when live shadow metrics degrade:
+  - max consecutive losses
+  - minimum rolling shadow win rate
+- Kept dual display:
   - `CURRENT SIGNAL`
-  - `NEXT SIGNAL` + ETA countdown
-- Polished UI with card-style overlay, confidence bar, and cleaner status text.
-- Added a much richer feature set (36 engineered features):
-  - multi-horizon momentum, velocity
-  - body/wick structure
-  - EMA spreads, MACD, RSI, stochastic, CCI, ATR
-  - volatility, trend slopes, Bollinger position
-  - support/resistance distances
-  - bullish ratio windows, template score, pattern score
-- Added heavy local model stack:
-  - linear head
-  - deep nonlinear head
-  - optional on-disk memory bank (`memmap`) targeting ~5GB
-  - online adaptation from realized candle outcomes
+  - `NEXT SIGNAL`
+  - explicit `Decision: TRADE / ABSTAIN(<reason>)`
+
+## Why this design
+
+The previous heavy architecture risked alpha illusion from overfitting noisy visual extraction.
+This design prioritizes:
+1. Data quality first
+2. Selective signal issuance
+3. Edge preservation over trade frequency
+4. Automatic risk-off behavior when quality degrades
 
 ## qxbroker security verification
 
@@ -33,7 +38,7 @@ If you see:
 - "Performing security verification"
 - "This website uses a security service..."
 
-Complete verification manually in the opened browser window; the app waits for it. This bot does **not** bypass anti-bot checks.
+Complete verification manually in the opened browser window. The app waits and continues.
 
 ## Install
 
@@ -50,11 +55,12 @@ python -m playwright install chromium
 cp config.example.yaml config.yaml
 ```
 
-Key settings:
-- `model.enable_heavy_memory_bank: true`
-- `model.target_size_gb: 5.0`
-- `prediction.feature_weights` (36 values)
-- chart color thresholds + timeframe
+Most important controls:
+- `prediction.min_extraction_quality`
+- `prediction.confidence_threshold_by_regime`
+- `prediction.allow_volatile_regime`
+- `risk.max_consecutive_losses`
+- `risk.min_shadow_win_rate`
 
 ## Run
 
@@ -66,8 +72,8 @@ Runtime:
 1. Browser opens qxbroker.
 2. Complete verification/login.
 3. Press Enter in terminal.
-4. Drag-select chart ROI once.
-5. Bot starts dual-signal output with heavy local model.
+4. Select chart ROI once.
+5. Bot runs with abstention-first logic.
 
 ## Hotkeys
 
@@ -76,6 +82,6 @@ Runtime:
 - `+/-` alert threshold
 - `Q` quit
 
-## Notes on 5GB model
+## Operational policy
 
-On first run with `enable_heavy_memory_bank: true`, the app creates a large local memmap file in `model_dir`. This can take time and disk space, but gives you a heavier local model footprint as requested.
+If shadow win-rate and guardrails fail consistently, stop live usage and treat the system as research-only until revalidated.

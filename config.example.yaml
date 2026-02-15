@@ -11,7 +11,7 @@ browser:
 
 chart:
   timeframe_seconds: 60
-  max_candles: 220
+  max_candles: 180
   bullish_bgr_min: [20, 120, 20]
   bullish_bgr_max: [170, 255, 170]
   bearish_bgr_min: [20, 20, 120]
@@ -19,24 +19,38 @@ chart:
 
 prediction:
   min_confidence_alert: 78
-  support_resistance_lookback: 120
-  adaptive_learning_rate: 0.015
-  model_bias: 0.0
-  # 36 weights must match FeatureEngineer.FEATURE_DIM.
-  feature_weights: [0.15, 0.14, 0.16, 0.12, 0.10, 0.10, 0.08, -0.02, 0.03, 0.11, 0.11, 0.10, 0.07, 0.06, -0.02, 0.08, 0.05, 0.07, -0.04, -0.03, 0.12, 0.12, 0.05, 0.06, -0.06, 0.06, 0.05, 0.04, 0.08, 0.09, 0.04, 0.03, 0.07, 0.08, 0.08, 0.0]
+  support_resistance_lookback: 100
+  min_extraction_quality: 0.72
+  min_candles_required: 60
+  allow_volatile_regime: false
+  confidence_threshold_by_regime:
+    trend_up: 66
+    trend_down: 66
+    range: 72
+    volatile: 85
+    unknown: 85
+  model_bias_by_regime:
+    default: 0.0
+    trend_up: 0.05
+    trend_down: -0.05
 
 model:
-  # Heavy local model settings
-  enable_heavy_memory_bank: true
-  target_size_gb: 5.0
-  model_dir: "./local_model"
-  hidden_dim: 512
-  memory_sample_rows: 4096
-  seed: 42
+  logit_temperature: 1.5
+  # Lean robust feature weights (12 features)
+  weights:
+    default: [0.70, 0.60, 0.40, -0.35, -0.25, 0.55, 0.40, 0.20, 0.10, 0.15, -0.15, 0.20]
+    trend_up: [0.80, 0.70, 0.50, -0.25, -0.15, 0.65, 0.45, 0.10, 0.10, 0.20, -0.20, 0.20]
+    trend_down: [0.80, 0.70, 0.50, -0.25, -0.15, 0.65, 0.45, 0.10, 0.10, 0.20, -0.20, 0.20]
+    range: [0.35, 0.30, 0.25, -0.40, -0.35, 0.20, 0.35, 0.10, 0.15, 0.25, -0.25, 0.15]
+
+risk:
+  max_consecutive_losses: 4
+  min_shadow_win_rate: 0.52
+  shadow_window: 80
 
 logging:
   enabled: true
   file: predictions_log.csv
 
 ui:
-  window_name: "Qxbroker AI Signals"
+  window_name: "Qxbroker Lean Survival Signals"
