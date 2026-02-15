@@ -1,62 +1,40 @@
-# Institutional-Grade Market Structure Intelligence Engine
+# Institutional Market Structure Intelligence Engine
 
-This repository now contains a **research-grade structural market model pipeline** (`institutional_engine.py`) designed for regime-aware probabilistic decisions with uncertainty and capital preservation controls.
+Production-style refactor with a **single deterministic entrypoint** and modular architecture.
 
-## Scope
+## Refactored structure
 
-- Input: clean OHLCV data (CSV)
-- Multi-timeframe aggregation: `1x, 3x, 5x, 15x, 1h, 4h`
-- Structural feature engineering (150+ features generated via multi-window/lag stacks)
-- Triple-barrier labeling
-- Ensemble model stack (tree branch + temporal branch + calibration)
-- Regime-aware decisioning with explicit **NO_TRADE** probability
-- Uncertainty-aware filtering
-- Risk intelligence + cost-aware backtesting
+- `main.py` — single entrypoint, CLI, top-level error handling
+- `pipeline.py` — orchestration and strict stage order
+- `logger.py` — structured JSON logging
+- `config/`
+  - `settings.py` — config loader
+  - `default.yaml` — baseline config
+- `data/loader.py` — data loading, preprocessing, MTF aggregation
+- `features/structural.py` — structural feature engineering
+- `training/labeling.py` — triple-barrier labels
+- `training/validation.py` — walk-forward split logic
+- `models/ensemble.py` — ensemble model stack (tree + temporal + calibration)
+- `inference/decision.py` — regime-aware decision filtering
+- `risk/engine.py` — risk multiplier + guard rails
+- `risk/backtest.py` — cost-aware backtest
+- `institutional_engine.py` — backward-compatible wrapper to `main.py`
 
-## Architecture Highlights
+## Execution order (enforced)
 
-### 1) Data Architecture
-- Volatility-aware missing candle handling
-- Structural gap/anomaly flags
-- Log returns, volatility-normalized returns, detrended close
-- Fractional differentiation for stationarity-with-memory
-- Multi-timeframe aggregation and feature merge
+1. Load config
+2. Load data
+3. Preprocess
+4. Generate features
+5. Generate labels
+6. Train model
+7. Validate (walk-forward)
+8. Backtest (cost-aware)
+9. Output diagnostics
 
-### 2) Structural Features
-Implemented feature families:
-- Trend/structure: rolling R², Hurst approximation, persistence, CUSUM breaks
-- Volatility: multi-window realized vol, vol-of-vol, entropy, ATR stack
-- Momentum hierarchy: ROC tree, RSI stack + derivatives, MACD derivatives, lag autocorrelation stack
-- Candle microstructure: wick asymmetry, close location, compression/expansion state
-- Liquidity/smart-money proxies: sweeps, equal highs/lows, FVG/imbalance, distance-to-level, vacuum probability
-- Regime layer: Gaussian-mixture regime clusters + mapped regime tags
+Pipeline stops with full traceback if any stage fails.
 
-### 3) Model Stack
-- Tree branch: random-forest surrogate for production tabular branch (configurable)
-- Temporal branch: sequential embedding branch (lag summary + multinomial head)
-- Ensemble blending + isotonic calibration
-- Outputs: `P(long), P(short), P(no-trade), uncertainty`
-
-### 4) Labeling/Validation Foundations
-- Triple-barrier labeling with volatility-adjusted barriers
-- Time-ordered train/test split (ready for purged walk-forward extension)
-- Cost-aware backtest with spread/slippage/latency controls
-
-### 5) Uncertainty + Filtering
-- Uncertainty penalization
-- Regime-aware dynamic thresholds
-- Multi-timeframe agreement gate
-- High-uncertainty/high-instability -> force NO_TRADE
-
-### 6) Risk Intelligence
-- Kelly-bounded risk multiplier
-- Regime-scaled leverage
-- Drawdown-aware throttling
-- Observation-mode trigger on edge decay conditions
-
-## Usage
-
-1. Install dependencies:
+## Install
 
 ```bash
 python -m venv .venv
@@ -64,55 +42,33 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-2. Create config:
+## Run
 
 ```bash
 cp config.example.yaml config.yaml
+python main.py --config config.yaml --input path/to/data.csv --output engine_output.json
 ```
 
-3. Run pipeline:
+### Debug mode
 
 ```bash
-python institutional_engine.py --config config.yaml --input path/to/your_real_ohlcv.csv --output engine_output.json
+python main.py --config config.yaml --input path/to/data.csv --output engine_output.json --debug
 ```
 
+Debug mode:
+- samples smaller dataset
+- increases stage logging verbosity
+- helps shape/integrity checks
 
-If you do not have a file yet, generate a template:
+### Generate sample CSV
 
 ```bash
-python institutional_engine.py --example-csv
-python institutional_engine.py --config config.yaml --input example_ohlcv.csv --output engine_output.json
+python main.py --example-csv
+python main.py --config config.yaml --input example_ohlcv.csv --output engine_output.json
 ```
-
-
-Quick convenience: if you run with the placeholder input and there is exactly one `.csv` in the current folder, the engine will auto-select it.
-If multiple CSV files exist, it will stop and ask you to pass `--input` explicitly.
-
-Input CSV columns required:
-- `timestamp, open, high, low, close`
-- optional: `volume`
-
-## Output Contract
-
-For each decision:
-- Regime classification
-- Structural bias
-- Probability long/short/no-trade
-- Uncertainty score
-- Risk multiplier
-- Confidence percentile
-- Recommended position size
 
 ## Notes
 
-- This is a research stack template that is intentionally stringent on abstention and capital protection.
-- Do not treat this as live investment advice.
-
-
-## PowerShell quickstart
-
-```powershell
-cp config.example.yaml config.yaml
-python institutional_engine.py --example-csv
-python institutional_engine.py --config config.yaml --input example_ohlcv.csv --output engine_output.json
-```
+- No code executes on import.
+- Entrypoint guard is enforced in both `main.py` and wrapper.
+- Structured logs are emitted per stage.
