@@ -28,7 +28,13 @@ class TradingOrchestrator(QObject):
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self.browser = QuotexBrowserEngine(config.runtime.quotex_url)
+        self.browser = QuotexBrowserEngine(
+            quotex_url=config.runtime.quotex_url,
+            profile_path=config.runtime.browser_profile_path,
+            cache_path=config.runtime.browser_cache_path,
+            user_agent=config.runtime.browser_user_agent,
+            injection_delay_ms=int(config.runtime.hook_injection_delay_seconds * 1000),
+        )
         self.window = MainWindow(self.browser.view)
         self.candles = CandleBuffer(maxlen=config.runtime.history_size)
         self.model = HybridMLModel()
@@ -41,11 +47,15 @@ class TradingOrchestrator(QObject):
 
         self.browser.bridge.packet_received.connect(self._on_packet)
         self.browser.page_loaded.connect(self._on_page_loaded)
+        self.browser.hook_installed.connect(self._on_hook_status)
 
         self.watchdog = QTimer()
         self.watchdog.timeout.connect(self._watchdog)
         self.watchdog.start(3000)
         self.last_packet_ts = time.time()
+        self.has_seen_market_packets = False
+        self.hook_active = False
+        self.watchdog_miss_count = 0
 
     def start(self) -> None:
         self.window.show()
@@ -58,12 +68,19 @@ class TradingOrchestrator(QObject):
         self.shutdown()
 
     def _on_page_loaded(self) -> None:
-        self.logger.info("Quotex page loaded; websocket hooks armed")
+        self.logger.info("Quotex page loaded; waiting for delayed hook install")
         self.window.activateWindow()
         self.browser.view.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
 
+    def _on_hook_status(self, active: bool) -> None:
+        self.hook_active = active
+        self.logger.info("WebSocket hook active=%s", active)
+
     def _on_packet(self, packet: dict) -> None:
-        self.last_packet_ts = time.time()
+        packet_type = str(packet.get("type", ""))
+        if packet_type.startswith("ws_"):
+            self.last_packet_ts = time.time()
+            self.has_seen_market_packets = True
         if self.packet_queue.full():
             _ = self.packet_queue.get_nowait()
         self.packet_queue.put_nowait(packet)
@@ -115,10 +132,24 @@ class TradingOrchestrator(QObject):
             self.window.panel.add_trade(signal_out.direction, signal_out.confidence, decision.reason)
 
     def _watchdog(self) -> None:
-        if time.time() - self.last_packet_ts > self.config.runtime.websocket_reconnect_seconds:
-            self.logger.warning("No WebSocket packets observed; reloading page")
-            self.browser.reload()
-            self.last_packet_ts = time.time()
+        if not self.hook_active:
+            return
+        if not self.has_seen_market_packets:
+            return
+
+        stale_for = time.time() - self.last_packet_ts
+        if stale_for > self.config.runtime.websocket_reconnect_seconds:
+            self.watchdog_miss_count += 1
+            self.logger.warning("Market WS stale for %.1fs (miss %s)", stale_for, self.watchdog_miss_count)
+            if self.watchdog_miss_count >= 3:
+                self.logger.warning("Reloading page after repeated WS stalls")
+                self.browser.reload()
+                self.watchdog_miss_count = 0
+                self.last_packet_ts = time.time()
+                self.has_seen_market_packets = False
+                self.hook_active = False
+        else:
+            self.watchdog_miss_count = 0
 
     def shutdown(self) -> None:
         self.watchdog.stop()

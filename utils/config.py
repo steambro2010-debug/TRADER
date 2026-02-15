@@ -24,7 +24,15 @@ class RuntimeConfig:
     history_size: int = 1200
     auto_trade_enabled: bool = False
     debug: bool = True
-    websocket_reconnect_seconds: int = 5
+    websocket_reconnect_seconds: int = 45
+    hook_injection_delay_seconds: int = 8
+    browser_profile_path: str = ".runtime/browser_profile"
+    browser_cache_path: str = ".runtime/browser_cache"
+    browser_user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
 
 
 @dataclass
