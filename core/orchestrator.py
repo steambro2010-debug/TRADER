@@ -48,6 +48,10 @@ class TradingOrchestrator(QObject):
         self.ml_lock = threading.Lock()
         self.first_candle_logged = False
 
+        self.total_packets = 0
+        self.market_packets = 0
+        self.parsed_candles = 0
+
         self.browser.bridge.packet_received.connect(self._on_packet)
         self.prediction_ready.connect(self._apply_prediction_gui)
         self.browser.page_loaded.connect(self._on_page_loaded)
@@ -103,15 +107,19 @@ class TradingOrchestrator(QObject):
         self.logger.info("WebSocket hook active=%s", active)
 
     def _on_packet(self, packet: dict) -> None:
+        self.total_packets += 1
         packet_type = str(packet.get("type", ""))
         if packet_type.startswith("ws_"):
             self.last_packet_ts = time.time()
             self.has_seen_market_packets = True
             self._stage_success("WEBSOCKET_DATA_RECEIVE")
-        if self.packet_queue.full():
-            _ = self.packet_queue.get_nowait()
-        self.packet_queue.put_nowait(packet)
-        self.executor_pool.submit(self._process_latest_packet)
+
+        if packet_type in {"ws_message", "ws_raw"}:
+            self.market_packets += 1
+            if self.packet_queue.full():
+                _ = self.packet_queue.get_nowait()
+            self.packet_queue.put_nowait(packet)
+            self.executor_pool.submit(self._process_latest_packet)
 
     def _force_predict(self) -> None:
         self.logger.info("Force Predict clicked")
@@ -120,7 +128,7 @@ class TradingOrchestrator(QObject):
     def _manual_prediction_probe(self) -> None:
         try:
             self.logger.info("[TEST_PREDICTION_LOOP] SUCCESS timer_tick")
-            self._run_prediction_pipeline(source="timer", ignore_minimum=False)
+            self.executor_pool.submit(self._run_prediction_pipeline, "timer", False)
         except Exception as exc:
             self.logger.exception("AI ERROR in manual probe: %s", exc)
             print(f"AI ERROR: {exc}")
@@ -131,6 +139,18 @@ class TradingOrchestrator(QObject):
         except Exception as exc:
             self.logger.exception("AI ERROR in packet pipeline: %s", exc)
             print(f"AI ERROR: {exc}")
+
+    def _emit_ui_status(self, status: str, latency_ms: float) -> None:
+        candles = len(self.candles.buffer)
+        self.prediction_ready.emit(
+            {
+                "status": status,
+                "buffer_len": candles,
+                "cpu": self._cpu_percent(),
+                "fps": 1.0 / max(time.time() - self.last_packet_ts, 1e-6),
+                "latency_ms": latency_ms,
+            }
+        )
 
     def _run_prediction_pipeline(self, source: str, ignore_minimum: bool = False) -> None:
         t0 = time.perf_counter()
@@ -143,6 +163,7 @@ class TradingOrchestrator(QObject):
             candle = self.candles.push_from_packet(packet)
             if candle is None:
                 return
+            self.parsed_candles += 1
             if not self.first_candle_logged:
                 self.first_candle_logged = True
                 print(f"First candle: {candle.__dict__}")
@@ -155,18 +176,11 @@ class TradingOrchestrator(QObject):
 
         min_required = min(self.config.runtime.min_candles_for_prediction, 10)
         if (not ignore_minimum) and buffer_len < min_required:
-            self.prediction_ready.emit(
-                {
-                    "status": f"Collecting data: {buffer_len} / {min_required} candles",
-                    "buffer_len": buffer_len,
-                    "cpu": self._cpu_percent(),
-                    "fps": 1.0 / max(time.time() - self.last_packet_ts, 1e-6),
-                    "latency_ms": (time.perf_counter() - t0) * 1000,
-                }
-            )
+            self._emit_ui_status(f"Collecting data: {buffer_len} / {min_required} candles", (time.perf_counter() - t0) * 1000)
             return
 
         if buffer_len == 0:
+            self._emit_ui_status("No candles yet", (time.perf_counter() - t0) * 1000)
             return
 
         df = self.candles.as_dataframe()
@@ -176,10 +190,12 @@ class TradingOrchestrator(QObject):
 
         with self.ml_lock:
             self._stage_success("MODEL_INFERENCE_CALLED")
+            trained_now = False
             if self.config.runtime.force_test_prediction_output:
                 prediction = Prediction(prob_up=65.0, prob_down=35.0, model_name="ForcedTestOutput")
+                trained_now = True
             else:
-                self.model.fit(features.tail(1200))
+                trained_now = self.model.fit(features.tail(1200))
                 prediction = self.model.predict(features)
 
         self._stage_success("PREDICTION_RETURNED")
@@ -198,16 +214,24 @@ class TradingOrchestrator(QObject):
                 "prob_up": prediction.prob_up,
                 "prob_down": prediction.prob_down,
                 "source": source,
+                "model_trained": self.model.fitted,
             },
-            headers=["timestamp", "asset", "timeframe", "direction", "confidence", "prob_up", "prob_down", "source"],
+            headers=["timestamp", "asset", "timeframe", "direction", "confidence", "prob_up", "prob_down", "source", "model_trained"],
         )
 
         now = time.time()
         fps = 1.0 / max(now - self.last_predict_ts, 1e-6)
         self.last_predict_ts = now
+
+        status = "Analyzing…"
+        if not self.model.fitted and not self.config.runtime.force_test_prediction_output:
+            status = "AI warming model (fallback probabilities)"
+        elif trained_now or self.model.fitted:
+            status = "AI Ready"
+
         self.prediction_ready.emit(
             {
-                "status": "Analyzing…",
+                "status": status,
                 "direction": signal_out.direction,
                 "confidence": signal_out.confidence,
                 "prob_up": prediction.prob_up,
@@ -226,6 +250,7 @@ class TradingOrchestrator(QObject):
                 "latency_ms": latency_ms,
                 "auto_enabled": self.window.panel.auto_toggle.isChecked() or self.config.runtime.auto_trade_enabled,
                 "threshold": float(self.window.panel.threshold_slider.value()),
+                "feed_health": f"packets={self.total_packets} ws={self.market_packets} candles={self.parsed_candles}",
             }
         )
 
@@ -237,7 +262,9 @@ class TradingOrchestrator(QObject):
             float(payload.get("latency_ms", 0.0)),
             int(payload.get("buffer_len", 0)),
         )
-        self.window.panel.set_status(str(payload.get("status", "Analyzing…")))
+        status = str(payload.get("status", "Analyzing…"))
+        feed_health = str(payload.get("feed_health", ""))
+        self.window.panel.set_status(f"{status} | {feed_health}" if feed_health else status)
 
         if "direction" not in payload:
             return

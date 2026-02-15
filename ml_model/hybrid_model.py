@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import importlib.util
 
-import numpy as np
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
@@ -17,8 +16,9 @@ class Prediction:
 
 
 class HybridMLModel:
-    def __init__(self, advanced_lstm: bool = False) -> None:
+    def __init__(self, advanced_lstm: bool = False, min_train_rows: int = 60) -> None:
         self.advanced_lstm = advanced_lstm
+        self.min_train_rows = min_train_rows
         self.model = self._build_tabular_model()
         self.feature_cols: list[str] = []
         self.fitted = False
@@ -49,12 +49,14 @@ class HybridMLModel:
             base = RandomForestClassifier(n_estimators=300, max_depth=8, random_state=42)
         return CalibratedClassifierCV(base, cv=3, method="sigmoid")
 
-    def fit(self, features: pd.DataFrame) -> None:
+    def fit(self, features: pd.DataFrame) -> bool:
         df = features.dropna().copy()
-        if len(df) < 200:
-            return
+        if len(df) < self.min_train_rows:
+            return False
         df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
         df = df.dropna()
+        if len(df) < self.min_train_rows:
+            return False
         ignore = {"timestamp", "asset", "timeframe", "target", "direction"}
         cols = [c for c in df.columns if c not in ignore]
         x = df[cols]
@@ -62,9 +64,10 @@ class HybridMLModel:
         self.model.fit(x, y)
         self.feature_cols = cols
         self.fitted = True
+        return True
 
     def predict(self, features: pd.DataFrame) -> Prediction:
-        if (not self.fitted) or features.empty:
+        if (not self.fitted) or features.empty or (not self.feature_cols):
             return Prediction(50.0, 50.0, self.model.__class__.__name__)
         row = features[self.feature_cols].tail(1)
         probs = self.model.predict_proba(row)[0]

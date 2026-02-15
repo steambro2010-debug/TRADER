@@ -18,23 +18,15 @@ HOOK_JS = """
   window.__quotexHookInstalled = true;
 
   function emit(payload) {
-    try {
-      window.pyBridge.onData(JSON.stringify(payload));
-    } catch (e) {}
+    try { window.pyBridge.onData(JSON.stringify(payload)); } catch (e) {}
   }
 
   const NativeWS = window.WebSocket;
   window.WebSocket = function(url, protocols) {
     const ws = protocols ? new NativeWS(url, protocols) : new NativeWS(url);
-    ws.addEventListener('open', function() {
-      emit({type: 'ws_open', url: ws.url, ts: Date.now()});
-    });
-    ws.addEventListener('close', function() {
-      emit({type: 'ws_close', url: ws.url, ts: Date.now()});
-    });
-    ws.addEventListener('error', function() {
-      emit({type: 'ws_error', url: ws.url, ts: Date.now()});
-    });
+    ws.addEventListener('open', function() { emit({type: 'ws_open', url: ws.url, ts: Date.now()}); });
+    ws.addEventListener('close', function() { emit({type: 'ws_close', url: ws.url, ts: Date.now()}); });
+    ws.addEventListener('error', function() { emit({type: 'ws_error', url: ws.url, ts: Date.now()}); });
     ws.addEventListener('message', function(event) {
       try {
         const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
@@ -60,6 +52,32 @@ HOOK_JS = """
 
   emit({type: 'hook_ready', ts: Date.now()});
   return 'hook_installed';
+})();
+"""
+
+
+BRIDGE_BOOTSTRAP_JS = """
+(function() {
+  function initBridge() {
+    if (window.pyBridge && window.pyBridge.onData) return 'bridge_already_ready';
+    if (typeof qt === 'undefined' || !qt.webChannelTransport) return 'qt_transport_missing';
+    if (typeof QWebChannel === 'undefined') return 'qwebchannel_missing';
+    new QWebChannel(qt.webChannelTransport, function(channel) {
+      window.pyBridge = channel.objects.pyBridge;
+    });
+    return 'bridge_init_called';
+  }
+
+  if (typeof QWebChannel !== 'undefined') {
+    return initBridge();
+  }
+
+  const script = document.createElement('script');
+  script.src = 'qrc:///qtwebchannel/qwebchannel.js';
+  script.onload = function() { initBridge(); };
+  script.onerror = function() {};
+  document.head.appendChild(script);
+  return 'qwebchannel_script_loading';
 })();
 """
 
@@ -91,6 +109,7 @@ class QuotexBrowserEngine(QObject):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.injection_delay_ms = injection_delay_ms
         self.hook_is_active = False
+        self._hook_attempts = 0
 
         profile_dir = Path(profile_path)
         cache_dir = Path(cache_path)
@@ -135,30 +154,36 @@ class QuotexBrowserEngine(QObject):
             self.hook_installed.emit(False)
             return
 
-        init_bridge = """
-            if (typeof qt !== 'undefined') {
-              new QWebChannel(qt.webChannelTransport, function(channel) {
-                window.pyBridge = channel.objects.pyBridge;
-              });
-            }
-        """
-        self.view.page().runJavaScript(init_bridge)
-
-        def delayed_inject() -> None:
-            self.view.page().runJavaScript(HOOK_JS, self._handle_injection_result)
-
-        QTimer.singleShot(self.injection_delay_ms, delayed_inject)
+        self._hook_attempts = 0
+        self._bootstrap_and_install_hook()
 
         self.view.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
         self.view.activateWindow()
         QTimer.singleShot(50, lambda: self.view.setFocus(Qt.FocusReason.TabFocusReason))
         self.page_loaded.emit()
 
+    def _bootstrap_and_install_hook(self) -> None:
+        def on_bootstrap(_result) -> None:
+            QTimer.singleShot(self.injection_delay_ms, self._install_hook)
+
+        self.view.page().runJavaScript(BRIDGE_BOOTSTRAP_JS, on_bootstrap)
+
+    def _install_hook(self) -> None:
+        self._hook_attempts += 1
+        self.view.page().runJavaScript(HOOK_JS, self._handle_injection_result)
+
     def _handle_injection_result(self, result) -> None:
-        ok = result in {"hook_installed", "already_installed"}
         self.logger.info("Hook injection result: %s", result)
-        self.hook_is_active = ok
-        self.hook_installed.emit(ok)
+        if result in {"hook_installed", "already_installed"}:
+            self.hook_is_active = True
+            self.hook_installed.emit(True)
+            return
+
+        self.hook_is_active = False
+        self.hook_installed.emit(False)
+        if self._hook_attempts < 5:
+            delay = min(4000, 500 * self._hook_attempts)
+            QTimer.singleShot(delay, self._bootstrap_and_install_hook)
 
     def evaluate_js(self, script: str, callback: Callable | None = None) -> None:
         self.view.page().runJavaScript(script, callback if callback else (lambda _: None))

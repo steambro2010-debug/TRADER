@@ -9,6 +9,7 @@ It embeds Chromium via PyQt6 WebEngine, captures structured network/state data, 
 - Uses a realistic Chrome user agent string.
 - Enables persistent cookies, local storage, cache, WebGL and GPU-accelerated canvas.
 - Delays WebSocket hook injection (`hook_injection_delay_seconds`, default 8s) to avoid early-page JS instability.
+- Adds hook retry/backoff + WebChannel bootstrap fallback when bridge is not ready on first attempt.
 - Logs JavaScript console messages for CSP/auth/WebSocket debugging.
 - Watchdog reloads only after confirmed WS activity followed by repeated stale intervals (prevents refresh loops before login).
 
@@ -68,6 +69,7 @@ python main.py
 - Scrollable trade log with conditional row coloring (win/loss).
 - Health header: CPU, FPS, latency, and candle buffer size.
 - Dynamic statuses:
+  - `AI warming model (fallback probabilities)`
   - `Collecting data: N / min candles`
   - `Analyzing…`
   - `AI Ready` / `Weak Signal`
