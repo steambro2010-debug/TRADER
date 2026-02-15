@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "quotex_url": "https://quotex.com/en/sign-in",
+    "quotex_url": "https://qxbroker.com/en/sign-in",
     "region": None,
     "min_candles_required": 200,
     "prediction_interval": 5,
