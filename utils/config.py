@@ -14,6 +14,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "candle_duration_sec": 60,
     "x_shift_threshold": 7.5,
     "model_path": "models/latest.pkl",
+    "browser_profile_dir": ".browser_profile",
+    "security_timeout_sec": 240,
 }
 
 

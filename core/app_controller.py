@@ -46,7 +46,12 @@ class AppController:
         self._setup_signals()
         cfg = self.config.all()
 
-        session = self.browser.launch(cfg["quotex_url"], self.stop_event)
+        session = self.browser.launch(
+            cfg["quotex_url"],
+            self.stop_event,
+            profile_dir=str(cfg.get("browser_profile_dir", ".browser_profile")),
+            security_timeout_sec=int(cfg.get("security_timeout_sec", 240)),
+        )
         if session is None:
             self.state["ai_status"] = "browser failed"
 

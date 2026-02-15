@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event
 from typing import Optional
 
@@ -16,7 +17,13 @@ class BrowserLauncher:
         self.logger = logger
         self.session: Optional[BrowserSession] = None
 
-    def launch(self, url: str, stop_event: Event) -> Optional[BrowserSession]:
+    def launch(
+        self,
+        url: str,
+        stop_event: Event,
+        profile_dir: str = ".browser_profile",
+        security_timeout_sec: int = 240,
+    ) -> Optional[BrowserSession]:
         try:
             from playwright.sync_api import sync_playwright
         except Exception as exc:
@@ -29,38 +36,41 @@ class BrowserLauncher:
         launch_args = [
             "--start-maximized",
             "--disable-blink-features=AutomationControlled",
-            "--disable-features=IsolateOrigins,site-per-process",
             "--disable-infobars",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
         ]
 
+        user_data_dir = str(Path(profile_dir).resolve())
+
         try:
-            browser = playwright.chromium.launch(headless=False, channel="chrome", args=launch_args)
+            context = playwright.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                headless=False,
+                channel="chrome",
+                args=launch_args,
+                locale="en-US",
+                timezone_id="UTC",
+                viewport={"width": 1440, "height": 900},
+            )
         except Exception:
-            browser = playwright.chromium.launch(headless=False, args=launch_args)
+            context = playwright.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                headless=False,
+                args=launch_args,
+                locale="en-US",
+                timezone_id="UTC",
+                viewport={"width": 1440, "height": 900},
+            )
 
-        context = browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            locale="en-US",
-            timezone_id="UTC",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-        )
-        context.add_init_script(
-            """
-Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-window.chrome = window.chrome || { runtime: {} };
-            """
-        )
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
 
-        page = context.new_page()
+        pages = context.pages
+        page = pages[0] if pages else context.new_page()
 
         urls_to_try = [url]
-        if "qxbroker.com" not in url:
+        if "qxbroker.com" not in (url or "").lower():
             urls_to_try.append("https://qxbroker.com/en/sign-in")
 
         loaded = False
@@ -77,31 +87,50 @@ window.chrome = window.chrome || { runtime: {} };
             self.logger.error("Unable to open Quotex/Qxbroker login page.")
             try:
                 context.close()
-                browser.close()
                 playwright.stop()
             except Exception:
                 pass
             return None
 
-        self.session = BrowserSession(page=page, playwright=playwright, browser=browser, context=context)
-        self._wait_for_security_check(page, stop_event)
+        self.session = BrowserSession(page=page, playwright=playwright, browser=context.browser, context=context)
+        self._wait_for_security_check(page, stop_event, timeout_sec=security_timeout_sec)
         self._wait_for_login(page, stop_event)
         return self.session
 
-    def _wait_for_security_check(self, page: object, stop_event: Event) -> None:
+    def _wait_for_security_check(self, page: object, stop_event: Event, timeout_sec: int = 240) -> None:
         self.logger.info("Checking for anti-bot verification page...")
-        while not stop_event.is_set():
-            if not self._is_security_check(page):
-                return
-            self.logger.info("Security verification detected, waiting for challenge completion...")
+        started = 0.0
+        try:
+            import time
+
+            started = time.time()
+        except Exception:
+            started = 0.0
+
+        notified = False
+        while not stop_event.is_set() and self._is_security_check(page):
+            if not notified:
+                self.logger.info(
+                    "Security verification detected. Complete the check in the opened browser window."
+                )
+                notified = True
             try:
-                page.wait_for_timeout(2500)
-                page.reload(wait_until="domcontentloaded", timeout=30_000)
+                page.wait_for_timeout(1000)
             except Exception:
+                return
+
+            if started:
                 try:
-                    page.wait_for_timeout(2500)
+                    import time
+
+                    if time.time() - started > max(30, timeout_sec):
+                        self.logger.warning(
+                            "Security verification is still active after %ss. Keeping browser open for manual completion.",
+                            timeout_sec,
+                        )
+                        return
                 except Exception:
-                    return
+                    pass
 
     def _is_security_check(self, page: object) -> bool:
         try:
@@ -122,10 +151,12 @@ window.chrome = window.chrome || { runtime: {} };
             "verifies you are not a bot",
             "security service",
             "checking your browser",
+            "just a moment",
             "cf-challenge",
+            "challenge-platform",
         ]
         target = f"{title}\n{body}\n{current_url}"
-        return any(m in target for m in markers)
+        return any(marker in target for marker in markers)
 
     def _wait_for_login(self, page: object, stop_event: Event) -> None:
         self.logger.info("Waiting for user login on Quotex/Qxbroker...")
@@ -153,7 +184,6 @@ window.chrome = window.chrome || { runtime: {} };
         self.logger.info("Closing browser session...")
         try:
             self.session.context.close()
-            self.session.browser.close()
             self.session.playwright.stop()
         except Exception:
             pass
