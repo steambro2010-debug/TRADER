@@ -1,0 +1,10 @@
+numpy
+pandas
+opencv-python
+mss
+scikit-learn
+xgboost
+lightgbm
+PySide6
+pyqtgraph
+matplotlib
