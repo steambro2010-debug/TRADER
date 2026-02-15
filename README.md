@@ -84,6 +84,10 @@ python institutional_engine.py --example-csv
 python institutional_engine.py --config config.yaml --input example_ohlcv.csv --output engine_output.json
 ```
 
+
+Quick convenience: if you run with the placeholder input and there is exactly one `.csv` in the current folder, the engine will auto-select it.
+If multiple CSV files exist, it will stop and ask you to pass `--input` explicitly.
+
 Input CSV columns required:
 - `timestamp, open, high, low, close`
 - optional: `volume`

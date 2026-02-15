@@ -32,6 +32,36 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 
 
+def resolve_input_csv_path(csv_path: str) -> Path:
+    """Resolve placeholder inputs to a real CSV when possible."""
+    raw = csv_path.strip()
+    candidate = Path(raw)
+    if candidate.exists():
+        return candidate
+
+    placeholder_tokens = {
+        "your_ohlcv.csv",
+        "path/to/your_real_ohlcv.csv",
+        "path\to\your_real_ohlcv.csv",
+    }
+
+    raw_norm = raw.replace('\\', '/').lower()
+    if raw_norm in placeholder_tokens:
+        csv_files = sorted(Path.cwd().glob('*.csv'))
+        if len(csv_files) == 1:
+            print(f"[info] Placeholder input detected; using discovered CSV: {csv_files[0]}")
+            return csv_files[0]
+        if len(csv_files) > 1:
+            names = "\n".join(f"  - {c}" for c in csv_files[:15])
+            raise FileNotFoundError(
+                "Placeholder input provided and multiple CSV files were found. "
+                "Please pass one explicitly with --input.\n"
+                f"CSV files:\n{names}"
+            )
+
+    return candidate
+
+
 @dataclass
 class DecisionOutput:
     timestamp: str
@@ -69,7 +99,7 @@ class DataArchitecture:
         self.frac_diff_d = float(cfg["data"]["fractional_diff_d"])
 
     def load_ohlcv(self, csv_path: str) -> pd.DataFrame:
-        path = Path(csv_path)
+        path = resolve_input_csv_path(csv_path)
         if not path.exists():
             csv_candidates = sorted(Path.cwd().glob("*.csv"))
             hint = "\n".join(f"  - {c}" for c in csv_candidates[:10]) if csv_candidates else "  (no CSV files found in current directory)"
