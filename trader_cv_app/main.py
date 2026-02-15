@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-import tkinter as tk
-
 from .config import AppConfig
-from .ui import TradingVisionUI
+from .gui import run_app
+from .logging_utils import setup_logging
 
 
 def main() -> None:
-    root = tk.Tk()
-    app = TradingVisionUI(root, AppConfig())
-
-    def on_close() -> None:
-        app.stop()
-        root.destroy()
-
-    root.protocol("WM_DELETE_WINDOW", on_close)
-    root.mainloop()
+    setup_logging()
+    run_app(AppConfig())
 
 
 if __name__ == "__main__":

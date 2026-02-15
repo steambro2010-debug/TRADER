@@ -1,9 +1,8 @@
+PyQt6
+mss
 opencv-python
 numpy
 pandas
-mss
-pyautogui
-Pillow
 scikit-learn
 xgboost
 tensorflow

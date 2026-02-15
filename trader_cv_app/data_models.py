@@ -2,7 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import List, Optional
+
+import numpy as np
+
+
+class ModelStatus(str, Enum):
+    UNTRAINED = "UNTRAINED"
+    READY = "READY"
+    TRAINING = "TRAINING"
+    ERROR = "ERROR"
+
+
+class PipelineStatus(str, Enum):
+    LOADING = "LOADING"
+    RUNNING = "RUNNING"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    STOPPED = "STOPPED"
 
 
 @dataclass
@@ -13,14 +31,14 @@ class Candle:
     low: float
     close: float
     bullish: bool
-    body_top_px: int
-    body_bottom_px: int
+    x_center: int
 
 
 @dataclass
-class FeatureRow:
-    timestamp: datetime
-    values: dict
+class FramePacket:
+    frame: np.ndarray
+    timestamp: float
+    fps: float
 
 
 @dataclass
@@ -33,7 +51,11 @@ class PredictionResult:
 
 @dataclass
 class SharedState:
+    latest_frame: Optional[np.ndarray] = None
     candles: List[Candle] = field(default_factory=list)
-    latest_frame: Optional[object] = None
-    latest_prediction: Optional[PredictionResult] = None
-    running: bool = True
+    prediction: Optional[PredictionResult] = None
+    capture_fps: float = 0.0
+    pipeline_status: PipelineStatus = PipelineStatus.LOADING
+    pipeline_message: str = "Initializing..."
+    model_status: ModelStatus = ModelStatus.UNTRAINED
+    model_message: str = "No trained model loaded"

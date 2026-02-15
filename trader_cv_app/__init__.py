@@ -1,1 +1,1 @@
-"""Standalone analysis-only candlestick computer vision predictor."""
+"""Production-grade analysis-only candlestick vision desktop application."""

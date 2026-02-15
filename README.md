@@ -1,61 +1,71 @@
-# Candlestick Vision Predictor (Standalone Python App)
+# Candlestick Vision Predictor (Production Desktop App)
 
-This project is an **analysis-only** desktop application that captures a user-selected chart region, extracts approximate OHLC candles with computer vision, computes indicators, and predicts next-candle direction with an ensemble model.
+A standalone **analysis-only** Python desktop application for real-time candlestick extraction and next-candle probability prediction.
 
-## Safety
+## Safety Constraint
 
 - No broker automation
 - No clicks/order placement
-- No software injection/control
+- No process injection
+- No external platform control
 - Analysis-only workflow
 
-## Features Implemented
+## Architecture
 
-1. **Screen Capture Module**
-   - High-speed capture using `mss` (fallback `pyautogui`)
-   - Manual ROI selection
-   - Configured for 5–10 FPS (`capture_fps=8` default)
+- **Main thread:** PyQt6 GUI only
+- **Thread 1:** `ScreenCaptureWorker` (`mss` ROI capture at 10–20 FPS)
+- **Thread 2:** `CandleVisionWorker` (OpenCV candle detection + OHLC extraction)
+- **Thread 3:** `InferenceWorker` (ensemble prediction)
+- Bounded thread-safe queues between every stage
+- Router/watchdog loop updates shared state and auto-restarts crashed workers
 
-2. **Candle Detection (OpenCV)**
-   - Color segmentation for green/red bodies
-   - Wick/body approximation from contour geometry
-   - Bullish/bearish classification
-   - Pixel-to-relative-price normalization
-   - Tracks last 50+ candles (up to configurable max)
+## Features
 
-3. **Feature Engineering**
-   - RSI
-   - EMA (9, 21, 50)
-   - MACD + signal
-   - Bollinger Bands
-   - ATR
-   - Basic candle pattern flags (doji/hammer)
+### 1) Screen Capture
+- Interactive click-drag ROI selection
+- 10–20 FPS target (default 15)
+- Error propagation to GUI with red warning states
+- Optimized capture path (single NumPy conversion, optional downscale)
 
-4. **Model Architecture (Ensemble)**
-   - Random Forest
-   - XGBoost (optional if installed)
-   - LSTM (optional TensorFlow)
-   - Weighted averaging outputs:
-     - Bullish probability
-     - Bearish probability
-     - Confidence score
+### 2) Computer Vision Candle Extraction
+- HSV color segmentation for bullish/bearish bodies
+- Wick detection from mask extrema
+- Bullish/bearish classification
+- Approximate normalized OHLC extraction
+- Rolling buffer of last 100 candles
 
-5. **UI (Tkinter)**
-   - Live chart reconstruction (last 50 candles)
-   - Prediction and probability display
-   - Confidence bar
-   - Training mode toggle
+### 3) Feature Engineering (vectorized)
+- RSI(14)
+- EMA(9, 21, 50)
+- MACD + signal
+- Bollinger Bands
+- ATR(14)
+- Candle pattern detection
+- Trend slope
+- Volatility regime
 
-6. **Performance**
-   - Multithreaded design:
-     - Thread 1: screen capture
-     - Thread 2: CV processing + features
-     - Thread 3: inference
-   - Optional GPU support via TensorFlow/XGBoost if available in environment
+### 4) Model Ensemble
+- Random Forest
+- XGBoost (optional if installed)
+- LSTM (TensorFlow optional)
+- Weighted averaging for:
+  - Bullish probability
+  - Bearish probability
+  - Confidence (agreement-based)
 
-7. **Training Mode**
-   - Record extracted OHLC/feature rows to CSV
-   - Train offline models from extracted data
+### 5) GUI (PyQt6 dark theme)
+- Live reconstructed candles
+- Prediction output and probability percentages
+- Confidence meter
+- FPS indicator
+- Model status (`READY`, `TRAINING`, `ERROR`, `UNTRAINED`)
+- Pipeline status (`LOADING`, `RUNNING`, `WARNING`, `ERROR`, `STOPPED`)
+- Never-blank loading states
+
+### 6) Training Mode
+- Optional append of extracted rows to CSV
+- Offline training from CSV
+- Save/load model weights from `models/`
 
 ## Run
 
@@ -65,5 +75,5 @@ python -m trader_cv_app.main
 
 ## Notes
 
-- CV candle extraction is heuristic and may need color threshold tuning based on chart theme.
-- For best results, use a clean chart area without overlays.
+- CV detection is heuristic and depends on chart colors/theme.
+- For best results, use a clean candlestick area with high contrast.
