@@ -1,0 +1,11 @@
+{
+  "quotex_url": "https://quotex.com/en/sign-in",
+  "region": null,
+  "min_candles_required": 200,
+  "prediction_interval": 5,
+  "confidence_threshold": 0.6,
+  "fps_cap": 12,
+  "candle_duration_sec": 60,
+  "x_shift_threshold": 7.5,
+  "model_path": "models/latest.pkl"
+}
