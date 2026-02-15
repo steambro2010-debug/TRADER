@@ -39,30 +39,81 @@ src/trader_ai/
   config.py            # Runtime configuration dataclasses
   main.py              # Application entrypoint
   train.py             # Offline training entrypoint
+run_live.py            # Launch live app (no PYTHONPATH needed)
+run_train.py           # Launch trainer (no PYTHONPATH needed)
 ```
 
 ## Installation
 
+### Windows PowerShell
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+If script execution is blocked in PowerShell, run once in that terminal:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+### Linux/macOS (bash/zsh)
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
 ## Run Live App
+
+### Recommended (cross-platform, no `PYTHONPATH` needed)
+
+```bash
+python run_live.py
+```
+
+### Alternative module form
+
+- **PowerShell**
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m trader_ai.main
+```
+
+- **Linux/macOS**
 
 ```bash
 PYTHONPATH=src python -m trader_ai.main
 ```
 
 At startup:
-1. Press **s** on the capture window to select chart ROI.
-2. Drag/select chart region and confirm.
-3. The app starts extracting candles and generating signals on candle-close events.
+1. Select chart ROI in the OpenCV selector and confirm.
+2. The app starts extracting candles and generating signals on candle-close events.
 
 ## Train Models
 
-You can train from historical structured candles CSV:
+### Recommended
+
+```bash
+python run_train.py --input data/candles.csv --model-dir models
+```
+
+### Alternative module form
+
+- **PowerShell**
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m trader_ai.train --input data/candles.csv --model-dir models
+```
+
+- **Linux/macOS**
 
 ```bash
 PYTHONPATH=src python -m trader_ai.train --input data/candles.csv --model-dir models
