@@ -7,7 +7,7 @@ import signal
 import threading
 import time
 
-from PyQt6.QtCore import QObject, QTimer
+from PyQt6.QtCore import QObject, QTimer, Qt
 from PyQt6.QtWidgets import QApplication
 
 from data_capture.browser_engine import QuotexBrowserEngine
@@ -49,7 +49,9 @@ class TradingOrchestrator(QObject):
 
     def start(self) -> None:
         self.window.show()
-        self.browser.show()
+        self.window.activateWindow()
+        self.browser.view.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        QTimer.singleShot(50, lambda: self.browser.view.setFocus(Qt.FocusReason.ActiveWindowFocusReason))
         signal.signal(signal.SIGINT, self._handle_sigint)
 
     def _handle_sigint(self, *_args) -> None:
@@ -57,6 +59,8 @@ class TradingOrchestrator(QObject):
 
     def _on_page_loaded(self) -> None:
         self.logger.info("Quotex page loaded; websocket hooks armed")
+        self.window.activateWindow()
+        self.browser.view.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
 
     def _on_packet(self, packet: dict) -> None:
         self.last_packet_ts = time.time()

@@ -21,6 +21,8 @@ from strategy.signal_generator import Signal
 class AnalyticsPanel(QWidget):
     def __init__(self) -> None:
         super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+
         layout = QVBoxLayout(self)
 
         self.direction_label = QLabel("Direction: -")
@@ -28,15 +30,19 @@ class AnalyticsPanel(QWidget):
         self.conf_bar = QProgressBar()
         self.conf_bar.setRange(0, 100)
         self.conf_bar.setFormat("Confidence %p%")
+        self.conf_bar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.auto_toggle = QCheckBox("Auto Trade")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self.threshold_slider.setRange(50, 99)
         self.threshold_slider.setValue(75)
         self.threshold_label = QLabel("Threshold: 75%")
+        self.threshold_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.threshold_slider.valueChanged.connect(lambda v: self.threshold_label.setText(f"Threshold: {v}%"))
 
         self.heatmap_label = QLabel("Indicator heatmap: RSI -, ADX -")
+        self.heatmap_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         self.trade_table = QTableWidget(0, 4)
         self.trade_table.setHorizontalHeaderLabels(["Time", "Dir", "Conf", "Result"])
 
@@ -73,9 +79,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Quotex WebSocket Trading Engine")
         self.resize(1560, 900)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        browser_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusProxy(browser_widget)
+
         self.panel = AnalyticsPanel()
 
         central = QWidget()
+        central.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout = QHBoxLayout(central)
         layout.addWidget(browser_widget, 3)
         layout.addWidget(self.panel, 1)

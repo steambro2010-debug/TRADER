@@ -4,8 +4,9 @@ import json
 import logging
 from typing import Callable
 
-from PyQt6.QtCore import QObject, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, Qt, QTimer, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtWebChannel import QWebChannel
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 
@@ -75,16 +76,28 @@ class QuotexBrowserEngine(QObject):
     def __init__(self, quotex_url: str) -> None:
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.profile = QWebEngineProfile("quotex-profile", self)
+        self.profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
+
         self.view = QWebEngineView()
         self.view.setWindowTitle("Quotex Embedded Browser")
-        self.view.resize(1280, 820)
-        self.view.load(QUrl(quotex_url))
+        self.view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        page = QWebEnginePage(self.profile, self.view)
+        self.view.setPage(page)
+        settings = page.settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True)
 
         self.bridge = BrowserBridge()
-        self.channel = QWebChannel(self.view.page())
+        self.channel = QWebChannel(page)
         self.channel.registerObject("pyBridge", self.bridge)
-        self.view.page().setWebChannel(self.channel)
+        page.setWebChannel(self.channel)
+
         self.view.loadFinished.connect(self._on_loaded)
+        self.view.load(QUrl(quotex_url))
 
     def _on_loaded(self, ok: bool) -> None:
         if not ok:
@@ -99,10 +112,12 @@ class QuotexBrowserEngine(QObject):
         """
         self.view.page().runJavaScript(init_bridge)
         self.view.page().runJavaScript(HOOK_JS)
-        self.page_loaded.emit()
 
-    def show(self) -> None:
-        self.view.show()
+        self.view.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        self.view.activateWindow()
+        QTimer.singleShot(0, lambda: self.view.setFocus(Qt.FocusReason.TabFocusReason))
+
+        self.page_loaded.emit()
 
     def evaluate_js(self, script: str, callback: Callable | None = None) -> None:
         self.view.page().runJavaScript(script, callback if callback else (lambda _: None))
