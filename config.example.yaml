@@ -1,0 +1,57 @@
+runtime:
+  seed: 42
+
+data:
+  base_freq: "1min"
+  timeframes: ["1x", "3x", "5x", "15x", "1h", "4h"]
+
+features:
+  windows: [8, 16, 32, 64, 128]
+
+training:
+  train_ratio: 0.75
+  walk_forward_splits: 3
+  labeling:
+    pt_mult: 1.4
+    sl_mult: 1.0
+    max_holding_bars: 24
+    neutral_move_mult: 0.35
+    min_no_trade_ratio: 0.05
+    enforce_three_classes: true
+
+models:
+  tree:
+    n_estimators: 600
+    max_depth: 9
+    min_samples_leaf: 20
+
+decision:
+  regime_thresholds:
+    default: 0.60
+    trend_expansion: 0.58
+    structured_trend: 0.60
+    range_compression: 0.66
+    volatility_expansion: 0.74
+    transitional: 0.70
+    low_vol_chop: 0.78
+  max_uncertainty: 0.18
+  require_mtf_agreement: true
+
+risk:
+  base_risk_unit: 0.01
+  kelly_cap: 0.25
+  max_drawdown: 0.12
+  dd_throttle: 0.8
+  max_consecutive_losses: 5
+
+backtest:
+  spread_bps: 1.5
+  slippage_bps: 1.2
+  latency_bars: 1
+
+output:
+  last_n_decisions: 50
+
+debug:
+  enabled: false
+  sample_rows: 2000
