@@ -4,11 +4,17 @@ import argparse
 import importlib
 import json
 import traceback
+from pathlib import Path
 
 from logger import get_logger
 
 
 REQUIRED_DEPS = ["numpy", "pandas", "yaml", "sklearn"]
+PLACEHOLDER_INPUTS = {
+    "your_ohlcv.csv",
+    "path/to/your_real_ohlcv.csv",
+    "path/to/data.csv",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,6 +74,17 @@ def main():
 
     if not args.input:
         raise SystemExit("Missing --input. Use --example-csv to generate sample data.")
+
+    normalized_input = args.input.replace("\\", "/").strip().lower()
+    input_path = Path(args.input)
+    if normalized_input in PLACEHOLDER_INPUTS and not input_path.exists():
+        sample_path = Path("example_ohlcv.csv")
+        if not sample_path.exists():
+            write_example_csv(sample_path.as_posix())
+            print(
+                "Detected placeholder --input path. Generated example_ohlcv.csv and using it for this run."
+            )
+        args.input = sample_path.as_posix()
 
     try:
         from config.settings import load_settings

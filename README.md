@@ -38,7 +38,11 @@ Pipeline stops with full traceback if any stage fails.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
+# Windows PowerShell:
+#   .\.venv\Scripts\Activate.ps1
+# Windows CMD:
+#   .venv\Scripts\activate.bat
 pip install -r requirements.txt
 ```
 
@@ -46,13 +50,13 @@ pip install -r requirements.txt
 
 ```bash
 cp config.example.yaml config.yaml
-python main.py --config config.yaml --input path/to/data.csv --output engine_output.json
+python main.py --config config.yaml --input <path-to-your-ohlcv.csv> --output engine_output.json
 ```
 
 ### Debug mode
 
 ```bash
-python main.py --config config.yaml --input path/to/data.csv --output engine_output.json --debug
+python main.py --config config.yaml --input <path-to-your-ohlcv.csv> --output engine_output.json --debug
 ```
 
 Debug mode:
@@ -95,11 +99,17 @@ If launch fails, run in this order:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
+# Windows PowerShell:
+#   .\.venv\Scripts\Activate.ps1
+# Windows CMD:
+#   .venv\Scripts\activate.bat
 pip install -r requirements.txt
 python main.py --example-csv
 python main.py --config config.yaml --input example_ohlcv.csv --output engine_output.json --debug
 ```
+
+If you pass a placeholder input (for example `path/to/data.csv`), `main.py` now auto-generates `example_ohlcv.csv` and runs that file so you can verify the pipeline launches end-to-end.
 
 The labeling stack now enforces 3 classes (`short`, `long`, `no-trade`) and includes fallback controls:
 - `training.labeling.min_no_trade_ratio`

@@ -7,12 +7,19 @@ import numpy as np
 import pandas as pd
 
 
+PLACEHOLDER_INPUTS = {
+    "your_ohlcv.csv",
+    "path/to/your_real_ohlcv.csv",
+    "path/to/data.csv",
+}
+
+
 def resolve_input_path(csv_path: str) -> Path:
     p = Path(csv_path)
     if p.exists():
         return p
     normalized = csv_path.replace('\\', '/').lower().strip()
-    if normalized in {"your_ohlcv.csv", "path/to/your_real_ohlcv.csv"}:
+    if normalized in PLACEHOLDER_INPUTS:
         files = sorted(Path.cwd().glob("*.csv"))
         if len(files) == 1:
             return files[0]
@@ -22,7 +29,17 @@ def resolve_input_path(csv_path: str) -> Path:
 def load_ohlcv(csv_path: str) -> pd.DataFrame:
     path = resolve_input_path(csv_path)
     if not path.exists():
-        raise FileNotFoundError(f"Input file not found: {csv_path}")
+        csv_candidates = sorted(Path.cwd().glob("*.csv"))
+        candidate_hint = "\n".join(f"  - {p.name}" for p in csv_candidates) or "  (none)"
+        raise FileNotFoundError(
+            "Input file not found: "
+            f"{csv_path}\n"
+            "You likely used a README placeholder path. Use one of these options:\n"
+            "1) Generate sample data: python main.py --example-csv\n"
+            "2) Re-run with a real file: python main.py --config config.yaml --input <your_file.csv> --output engine_output.json\n"
+            "CSV files detected in current directory:\n"
+            f"{candidate_hint}"
+        )
     df = pd.read_csv(path)
     required = {"timestamp", "open", "high", "low", "close"}
     missing = required - set(df.columns)
