@@ -46,6 +46,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## One-click launch (no CSV required)
+
+```bash
+python main.py
+```
+
+This auto-creates `config.yaml` (from `config.example.yaml` or `config/default.yaml`) and auto-generates `example_ohlcv.csv` if missing, then runs the full pipeline end-to-end.
+
 ## Run
 
 ```bash
@@ -94,6 +102,8 @@ Tune `training.labeling.neutral_move_mult` (with `pt_mult/sl_mult`) to control n
 
 
 ## Launch troubleshooting
+
+If you just want to verify launch, use `python main.py` (no flags) for one-click bootstrap mode.
 
 If launch fails, run in this order:
 

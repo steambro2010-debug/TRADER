@@ -61,6 +61,22 @@ def write_example_csv(path: str = "example_ohlcv.csv"):
     df.to_csv(path, index=False)
 
 
+def ensure_config(config_path: str) -> str:
+    target = Path(config_path)
+    if target.exists():
+        return target.as_posix()
+
+    candidate_sources = [Path("config.example.yaml"), Path("config/default.yaml")]
+    source = next((p for p in candidate_sources if p.exists()), None)
+    if source is None:
+        raise FileNotFoundError(
+            "No configuration file found. Expected one of: "
+            "config.yaml, config.example.yaml, config/default.yaml"
+        )
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return target.as_posix()
+
+
 def main():
     log = get_logger("main")
     args = parse_args()
@@ -72,8 +88,14 @@ def main():
         print("Wrote example_ohlcv.csv. Run with --input example_ohlcv.csv")
         return
 
+    # One-click launch path: no input provided -> auto-generate sample data.
     if not args.input:
-        raise SystemExit("Missing --input. Use --example-csv to generate sample data.")
+        args.input = "example_ohlcv.csv"
+        if not Path(args.input).exists():
+            write_example_csv(args.input)
+            print("No --input provided. Generated example_ohlcv.csv for one-click launch.")
+
+    args.config = ensure_config(args.config)
 
     normalized_input = args.input.replace("\\", "/").strip().lower()
     input_path = Path(args.input)
