@@ -10,8 +10,13 @@ import numpy as np
 import pyttsx3
 import sounddevice as sd
 from faster_whisper import WhisperModel
-from pvrecorder import PvRecorder
-import pvporcupine
+
+try:
+    from pvrecorder import PvRecorder
+    import pvporcupine
+except ImportError:  # optional when running no-key mode
+    PvRecorder = None
+    pvporcupine = None
 
 
 @dataclass(slots=True)
@@ -30,7 +35,6 @@ class InterruptibleTTS:
         self._engine.setProperty("rate", rate)
         self._engine.setProperty("volume", volume)
         self._queue: queue.Queue[str] = queue.Queue()
-        self._stop_event = threading.Event()
         self._shutdown_event = threading.Event()
         self._worker = threading.Thread(target=self._run, daemon=True, name="tts-worker")
         self._worker.start()
@@ -39,7 +43,6 @@ class InterruptibleTTS:
         self._queue.put(text)
 
     def interrupt(self) -> None:
-        self._stop_event.set()
         self._engine.stop()
 
     def shutdown(self) -> None:
@@ -57,34 +60,49 @@ class InterruptibleTTS:
 
             if self._shutdown_event.is_set():
                 break
-
             if not text:
                 continue
 
-            self._stop_event.clear()
             self._engine.say(text)
             self._engine.runAndWait()
 
 
 class WakeWordListener:
-    """Low-CPU wake-word listener using Porcupine + PvRecorder."""
+    """Wake-word listener using Porcupine when key exists, otherwise Whisper fallback."""
 
     def __init__(
         self,
-        access_key: str,
+        stt: "StreamingSTT",
+        access_key: str = "",
         wake_word: str = "jarvis",
         sensitivity: float = 0.65,
-        sample_rate: int = 16000,
     ) -> None:
-        self._porcupine = pvporcupine.create(
-            access_key=access_key,
-            keywords=[wake_word],
-            sensitivities=[sensitivity],
-        )
-        self._recorder = PvRecorder(device_index=-1, frame_length=self._porcupine.frame_length)
-        self._sample_rate = sample_rate
+        self._stt = stt
+        self._wake_word = wake_word.lower().strip()
+        self._mode = "fallback"
+        self._porcupine = None
+        self._recorder = None
+
+        if access_key and pvporcupine and PvRecorder:
+            self._porcupine = pvporcupine.create(
+                access_key=access_key,
+                keywords=[wake_word],
+                sensitivities=[sensitivity],
+            )
+            self._recorder = PvRecorder(device_index=-1, frame_length=self._porcupine.frame_length)
+            self._mode = "porcupine"
+
+    @property
+    def mode(self) -> str:
+        return self._mode
 
     def listen_until_wake(self, stop_event: threading.Event) -> bool:
+        if self._mode == "porcupine":
+            return self._listen_porcupine(stop_event)
+        return self._listen_fallback(stop_event)
+
+    def _listen_porcupine(self, stop_event: threading.Event) -> bool:
+        assert self._recorder is not None and self._porcupine is not None
         self._recorder.start()
         try:
             while not stop_event.is_set():
@@ -96,9 +114,21 @@ class WakeWordListener:
         finally:
             self._recorder.stop()
 
+    def _listen_fallback(self, stop_event: threading.Event) -> bool:
+        # In no-key mode, continuously transcribe short utterances and trigger on wake phrase.
+        while not stop_event.is_set():
+            text = self._stt.capture_and_transcribe(max_record_seconds=2.5).lower().strip()
+            if not text:
+                continue
+            if self._wake_word in text:
+                return True
+        return False
+
     def close(self) -> None:
-        self._recorder.delete()
-        self._porcupine.delete()
+        if self._recorder is not None:
+            self._recorder.delete()
+        if self._porcupine is not None:
+            self._porcupine.delete()
 
 
 class StreamingSTT:
@@ -116,12 +146,13 @@ class StreamingSTT:
         self._max_record_seconds = max_record_seconds
         self._model = WhisperModel(model_size, compute_type="int8", cpu_threads=4)
 
-    def capture_and_transcribe(self) -> str:
+    def capture_and_transcribe(self, max_record_seconds: float | None = None) -> str:
         audio_chunks: list[np.ndarray] = []
         silence_frames = 0
-        max_silence_frames = int(self._sample_rate * 1.0 / 1024)
+        max_silence_frames = int(self._sample_rate * 0.9 / 1024)
+        capture_limit = max_record_seconds if max_record_seconds is not None else self._max_record_seconds
 
-        def callback(indata: np.ndarray, frames: int, _time, _status) -> None:
+        def callback(indata: np.ndarray, _frames: int, _time, _status) -> None:
             nonlocal silence_frames
             mono = indata[:, 0].copy()
             audio_chunks.append(mono)
@@ -136,8 +167,8 @@ class StreamingSTT:
             callback=callback,
         ):
             start = time.time()
-            while time.time() - start < self._max_record_seconds:
-                if silence_frames > max_silence_frames and len(audio_chunks) > 8:
+            while time.time() - start < capture_limit:
+                if silence_frames > max_silence_frames and len(audio_chunks) > 6:
                     break
                 time.sleep(0.05)
 
@@ -154,15 +185,19 @@ class AudioEngine:
 
     def __init__(
         self,
-        porcupine_access_key: str,
+        porcupine_access_key: str = "",
         wake_word: str = "jarvis",
         whisper_model: str = "base.en",
     ) -> None:
         self._stop_event = threading.Event()
-        self._wake_listener = WakeWordListener(porcupine_access_key, wake_word=wake_word)
         self._stt = StreamingSTT(model_size=whisper_model)
+        self._wake_listener = WakeWordListener(self._stt, access_key=porcupine_access_key, wake_word=wake_word)
         self.tts = InterruptibleTTS()
         self.on_command: Optional[Callable[[VoiceCommand], None]] = None
+
+    @property
+    def wake_mode(self) -> str:
+        return self._wake_listener.mode
 
     def start(self) -> None:
         threading.Thread(target=self._loop, daemon=True, name="audio-engine").start()
@@ -191,5 +226,5 @@ class AudioEngine:
 
     def request_confirmation(self, prompt: str) -> bool:
         self.tts.speak_async(prompt)
-        text = self._stt.capture_and_transcribe().lower().strip()
+        text = self._stt.capture_and_transcribe(max_record_seconds=5).lower().strip()
         return any(token in text for token in ["confirm", "yes", "proceed", "do it"])

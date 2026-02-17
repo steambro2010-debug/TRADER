@@ -17,8 +17,6 @@ from vision import VisionEngine
 class JarvisAssistant:
     def __init__(self) -> None:
         key = os.getenv("PORCUPINE_ACCESS_KEY", "")
-        if not key:
-            raise RuntimeError("Set PORCUPINE_ACCESS_KEY in environment")
 
         self.audio = AudioEngine(porcupine_access_key=key, wake_word="jarvis", whisper_model="base.en")
         self.controller = DesktopController()
@@ -37,7 +35,8 @@ class JarvisAssistant:
         self.command_queue.put(cmd)
 
     def run(self) -> None:
-        self.audio.tts.speak_async("Jarvis online. Listening for wake word.")
+        mode_msg = "Porcupine" if self.audio.wake_mode == "porcupine" else "no-key Whisper fallback"
+        self.audio.tts.speak_async(f"Jarvis online. Wake mode: {mode_msg}.")
         self.audio.start()
 
         while not self.shutdown_event.is_set():
@@ -90,7 +89,6 @@ class JarvisAssistant:
 
             self.audio.tts.speak_async(report.summary)
 
-            # Re-scan after each step to adapt to UI changes.
             try:
                 screen = self.vision.analyze()
                 self.memory.add_event("screen_after_step", screen.to_dict())
