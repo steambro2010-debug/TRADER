@@ -1,0 +1,8 @@
+pyttsx3>=2.90
+vosk>=0.3.45
+sounddevice>=0.4.6
+requests>=2.31.0
+mss>=9.0.1
+pytesseract>=0.3.10
+Pillow>=10.0.0
+playwright>=1.45.0
