@@ -54,3 +54,9 @@ python main.py
 - Streamlit app: http://127.0.0.1:8501
 
 Everything runs entirely local and free (no paid APIs, no cloud dependencies).
+
+
+## Real Mode
+- First launch shows Welcome screen with **Start Fresh**.
+- **Demo Mode** can be toggled in Settings.
+- **Reset All Data** clears sessions/tests/habits and resets syllabus progress to 0%.

@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS syllabus_progress (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     syllabus_id INTEGER,
-    completion_status INTEGER DEFAULT 0,
+    completion_status REAL DEFAULT 0,
     confidence_score REAL DEFAULT 0,
     questions_solved INTEGER DEFAULT 0,
     accuracy REAL DEFAULT 0,
@@ -118,4 +118,9 @@ CREATE TABLE IF NOT EXISTS analytics (
     metric_date TEXT DEFAULT CURRENT_TIMESTAMP,
     metadata TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
