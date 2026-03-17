@@ -1,22 +1,38 @@
 # JEEOS — JEE Preparation Operating System
 
-Local-first JEE prep app with FastAPI backend, Streamlit frontend, SQLite storage, Plotly analytics, and basic ML rank prediction.
+A fully local, production-style JEE analytics dashboard built with FastAPI + Streamlit + SQLite + Plotly.
 
-## Folder structure
+## Features
+- Auto-loaded full JEE syllabus (Physics, Chemistry, Mathematics) stored in SQLite on first run.
+- Modern dashboard with dynamic charts:
+  - Subject study distribution (pie)
+  - Syllabus completion vs remaining (pie)
+  - Daily study hours (line)
+  - Subject performance (bar)
+  - Weak topic heatmap (red→green)
+- Daily system with task checkboxes and completion progress bar.
+- Auto calculations for completion %, accuracy, and discipline score.
+- Seeded sample data (study sessions, tests, syllabus progress) for immediate analytics.
+- Rank prediction, revision engine, weak-topic detection, and strategy insights.
+
+## Project Structure
 
 ```
 jeeos/
   main.py
   requirements.txt
-  README.md
-  database/
-  backend/
-  frontend/
-  modules/
-  analytics/
-  models/
-  utils/
-  data/
+  frontend/app.py
+  backend/app.py
+  database/schema.sql
+  database/db.py
+  database/seed.py
+  modules/syllabus_data.py
+  modules/planner.py
+  modules/revision.py
+  analytics/insights.py
+  analytics/strategy.py
+  models/schemas.py
+  utils/api_client.py
 ```
 
 ## Install
@@ -24,7 +40,7 @@ jeeos/
 ```bash
 cd jeeos
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -34,29 +50,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Services:
-- API: http://127.0.0.1:8000/docs
-- UI: http://127.0.0.1:8501
+- FastAPI docs: http://127.0.0.1:8000/docs
+- Streamlit app: http://127.0.0.1:8501
 
-## Included modules
-
-1. Master Dashboard
-2. JEE Syllabus Engine
-3. Study Session Tracker (manual start/end + Pomodoro-compatible flow)
-4. AI Study Planner
-5. Daily Execution System
-6. Discipline Tracker
-7. Streak System
-8. Mock Test Analytics
-9. Rank Prediction (scikit-learn linear model)
-10. Weak Topic Detection
-11. Revision Engine (1/3/7/21/60)
-12. PYQ Tracker schema
-13. Mistake Notebook schema
-14. Strategy Engine with sample past-question dataset
-15. Performance Summary through dashboard metrics
-16. Weekly Review through 7-day aggregates
-17. ChatGPT integration buttons using pyperclip + webbrowser
-18. Streamlit UI sections
-
-All data is stored locally in `database/jeeos.db`.
+Everything runs entirely local and free (no paid APIs, no cloud dependencies).

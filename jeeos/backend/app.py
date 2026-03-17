@@ -8,8 +8,9 @@ from database.db import get_connection
 from models.schemas import DailyPlanRequest, HabitIn, MockTestIn, StudySessionIn
 from modules.planner import generate_daily_plan
 from modules.revision import schedule_revision
+from modules.syllabus_data import FULL_JEE_SYLLABUS
 
-app = FastAPI(title="JEEOS API", version="1.0.0")
+app = FastAPI(title="JEEOS API", version="2.0.0")
 DEFAULT_USER = 1
 
 
@@ -18,9 +19,63 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/chapters/{subject}")
+def chapters_by_subject(subject: str):
+    return {"subject": subject, "chapters": FULL_JEE_SYLLABUS.get(subject, [])}
+
+
 @app.get("/dashboard")
 def dashboard():
     return dashboard_metrics(DEFAULT_USER)
+
+
+@app.get("/analytics-overview")
+def analytics_overview():
+    with get_connection() as conn:
+        study = pd.read_sql_query(
+            "SELECT date(start_time) day, subject, SUM(duration_minutes)/60 hours FROM study_sessions WHERE user_id=? GROUP BY date(start_time), subject",
+            conn,
+            params=(DEFAULT_USER,),
+        )
+        syllabus = pd.read_sql_query(
+            """
+            SELECT s.subject, s.chapter, sp.completion_status, sp.accuracy
+            FROM syllabus_progress sp JOIN syllabus s ON sp.syllabus_id=s.id
+            WHERE sp.user_id=?
+            """,
+            conn,
+            params=(DEFAULT_USER,),
+        )
+        tests = pd.read_sql_query(
+            "SELECT physics_score, chemistry_score, math_score FROM mock_tests WHERE user_id=?",
+            conn,
+            params=(DEFAULT_USER,),
+        )
+
+    subject_dist = study.groupby("subject", as_index=False)["hours"].sum() if not study.empty else pd.DataFrame(columns=["subject", "hours"])
+    daily_hours = study.groupby("day", as_index=False)["hours"].sum() if not study.empty else pd.DataFrame(columns=["day", "hours"])
+
+    completion_pct = float((syllabus["completion_status"].mean() * 100) if not syllabus.empty else 0)
+    completion_data = [
+        {"label": "Completed", "value": round(completion_pct, 2)},
+        {"label": "Remaining", "value": round(100 - completion_pct, 2)},
+    ]
+
+    perf_data = []
+    if not tests.empty:
+        perf_data = [
+            {"subject": "Physics", "score": round(float(tests["physics_score"].mean()), 2)},
+            {"subject": "Chemistry", "score": round(float(tests["chemistry_score"].mean()), 2)},
+            {"subject": "Mathematics", "score": round(float(tests["math_score"].mean()), 2)},
+        ]
+
+    return {
+        "subject_distribution": subject_dist.to_dict(orient="records"),
+        "daily_hours": daily_hours.sort_values("day").to_dict(orient="records"),
+        "completion_split": completion_data,
+        "subject_performance": perf_data,
+        "weak_topic_heatmap": syllabus.to_dict(orient="records"),
+    }
 
 
 @app.post("/study-session")
@@ -46,42 +101,17 @@ def add_study_session(payload: StudySessionIn):
             """
             UPDATE syllabus_progress
             SET questions_solved = questions_solved + ?,
-                completion_status = MIN(1.0, completion_status + 0.03),
-                accuracy = MIN(1.0, accuracy + 0.01),
-                confidence_score = MIN(1.0, confidence_score + 0.01),
+                completion_status = MIN(1.0, completion_status + CASE WHEN ? >= 20 THEN 0.04 ELSE 0.02 END),
+                accuracy = MIN(1.0, accuracy + 0.015),
+                confidence_score = MIN(1.0, confidence_score + 0.012),
                 last_revision_date = ?
             WHERE user_id=? AND syllabus_id=(SELECT id FROM syllabus WHERE subject=? AND chapter=? LIMIT 1)
             """,
-            (payload.questions_solved, date.today().isoformat(), DEFAULT_USER, payload.subject, payload.chapter),
+            (payload.questions_solved, payload.questions_solved, date.today().isoformat(), DEFAULT_USER, payload.subject, payload.chapter),
         )
         conn.commit()
     schedule_revision(DEFAULT_USER, payload.chapter)
     return {"message": "session saved", "minutes": minutes}
-
-
-@app.get("/study-stats")
-def study_stats():
-    with get_connection() as conn:
-        weekly = pd.read_sql_query(
-            """
-            SELECT date(start_time) day, SUM(duration_minutes)/60 hours
-            FROM study_sessions
-            WHERE user_id=?
-            GROUP BY date(start_time)
-            ORDER BY day DESC LIMIT 7
-            """,
-            conn,
-            params=(DEFAULT_USER,),
-        )
-        subj = pd.read_sql_query(
-            "SELECT subject, SUM(duration_minutes)/60 hours FROM study_sessions WHERE user_id=? GROUP BY subject",
-            conn,
-            params=(DEFAULT_USER,),
-        )
-    return {
-        "weekly": weekly.to_dict(orient="records"),
-        "subject_distribution": subj.to_dict(orient="records"),
-    }
 
 
 @app.get("/syllabus")
@@ -143,6 +173,16 @@ def fetch_daily_plan():
     return [dict(r) for r in rows]
 
 
+@app.post("/daily-plan/{task_id}/toggle")
+def toggle_plan_task(task_id: int):
+    with get_connection() as conn:
+        row = conn.execute("SELECT completed FROM daily_plan WHERE id=? AND user_id=?", (task_id, DEFAULT_USER)).fetchone()
+        if row:
+            conn.execute("UPDATE daily_plan SET completed=? WHERE id=?", (0 if row["completed"] else 1, task_id))
+            conn.commit()
+    return {"message": "updated"}
+
+
 @app.post("/habit")
 def add_habit(payload: HabitIn):
     values = [
@@ -179,7 +219,7 @@ def weak_topics():
             """
             SELECT s.subject, s.chapter, sp.accuracy, sp.confidence_score
             FROM syllabus_progress sp JOIN syllabus s ON sp.syllabus_id=s.id
-            WHERE sp.user_id=? ORDER BY (sp.accuracy + sp.confidence_score) ASC LIMIT 8
+            WHERE sp.user_id=? ORDER BY (sp.accuracy + sp.confidence_score) ASC LIMIT 10
             """,
             (DEFAULT_USER,),
         ).fetchall()
@@ -194,65 +234,6 @@ def revision_tasks():
             (DEFAULT_USER,),
         ).fetchall()
     return [dict(r) for r in rows]
-
-
-@app.post("/pyq-attempt")
-def add_pyq_attempt(payload: dict):
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO question_attempts(user_id, year, subject, chapter, is_correct, time_taken_seconds) VALUES(?,?,?,?,?,?)",
-            (DEFAULT_USER, payload["year"], payload["subject"], payload["chapter"], int(payload["is_correct"]), payload["time_taken_seconds"]),
-        )
-        conn.commit()
-    return {"message": "pyq attempt saved"}
-
-
-@app.get("/pyq-analytics")
-def pyq_analytics():
-    with get_connection() as conn:
-        rows = pd.read_sql_query(
-            "SELECT chapter, AVG(is_correct)*100 accuracy, COUNT(*) attempts FROM question_attempts WHERE user_id=? GROUP BY chapter",
-            conn,
-            params=(DEFAULT_USER,),
-        )
-    return rows.to_dict(orient="records")
-
-
-@app.post("/mistake")
-def add_mistake(payload: dict):
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO mistake_log(user_id, question_image_path, chapter, mistake_type, note) VALUES(?,?,?,?,?)",
-            (DEFAULT_USER, payload.get("question_image_path"), payload["chapter"], payload["mistake_type"], payload.get("note", "")),
-        )
-        conn.commit()
-    return {"message": "mistake logged"}
-
-
-@app.get("/mistake-analytics")
-def mistake_analytics():
-    with get_connection() as conn:
-        rows = pd.read_sql_query(
-            "SELECT mistake_type, COUNT(*) count FROM mistake_log WHERE user_id=? GROUP BY mistake_type",
-            conn,
-            params=(DEFAULT_USER,),
-        )
-    return rows.to_dict(orient="records")
-
-
-@app.get("/weekly-review")
-def weekly_review():
-    with get_connection() as conn:
-        review = conn.execute(
-            """
-            SELECT COALESCE(SUM(duration_minutes)/60,0) hours, COALESCE(AVG(discipline_score),0) discipline
-            FROM study_sessions ss LEFT JOIN habits h ON date(ss.start_time)=h.habit_date AND h.user_id=ss.user_id
-            WHERE ss.user_id=? AND date(ss.start_time)>=date('now','-7 day')
-            """,
-            (DEFAULT_USER,),
-        ).fetchone()
-    weak = weak_topics()
-    return {"study_hours": round(review["hours"],2), "discipline_score": round(review["discipline"],2), "weak_chapters": weak[:5]}
 
 
 @app.get("/strategy")
