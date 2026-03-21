@@ -239,7 +239,7 @@ function buildAlerts(dailyLogs, weightMetrics) {
     }
 
     if (weightMetrics.streakCount <= 1 && sortedDates.length > 1 && daysSinceLastEntry >= 1) {
-      alerts.push({ type: 'alert', title: 'Streak broken', message: 'Your logging streak has broken. Restart with today's check-in.' })
+      alerts.push({ type: 'alert', title: 'Streak broken', message: "Your logging streak has broken. Restart with today's check-in." })
     }
   }
 
