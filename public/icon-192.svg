@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-labelledby="title desc">
+  <title id="title">30 Day Cut Tracker icon</title>
+  <desc id="desc">Dark rounded square with cyan chart line and checkmark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="42" fill="url(#bg)" />
+  <rect x="18" y="18" width="156" height="156" rx="34" fill="none" stroke="#164e63" stroke-width="4" />
+  <path d="M42 126 L74 94 L100 110 L142 62" fill="none" stroke="url(#accent)" stroke-linecap="round" stroke-linejoin="round" stroke-width="14" />
+  <path d="M72 54 h48" stroke="#a5f3fc" stroke-linecap="round" stroke-width="10" />
+  <circle cx="142" cy="62" r="10" fill="#22d3ee" />
+</svg>
