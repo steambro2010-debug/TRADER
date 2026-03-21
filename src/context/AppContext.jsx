@@ -14,7 +14,7 @@ import {
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore'
-import { auth, db, hasFirebaseConfig } from '../lib/firebase'
+import { auth, db, firebaseEnvError, hasFirebaseConfig } from '../lib/firebase'
 import {
   TODAY_LOG_KEY,
   buildWeightMetrics,
@@ -42,7 +42,7 @@ export function AppProvider({ children }) {
   const [profile, setProfile] = useState(defaultProfile)
   const [checkins, setCheckins] = useState({})
   const [loadingData, setLoadingData] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState(firebaseEnvError)
   const [progressPhoto, setProgressPhoto] = useState(readProgressPhoto)
 
   useEffect(() => {
@@ -109,11 +109,16 @@ export function AppProvider({ children }) {
 
   async function signInWithGoogle() {
     if (!hasFirebaseConfig || !auth) {
-      setErrorMessage('Firebase is not configured yet. Add Vite Firebase environment variables to enable login.')
+      setErrorMessage(firebaseEnvError || 'Firebase is not configured yet. Add Vite Firebase environment variables to enable login.')
       return false
     }
 
     try {
+      if (firebaseEnvError) {
+        setErrorMessage(firebaseEnvError)
+        return false
+      }
+
       setErrorMessage('')
       const provider = new GoogleAuthProvider()
       await signInWithPopup(auth, provider)
